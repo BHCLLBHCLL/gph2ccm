@@ -30,6 +30,9 @@ class CcmModel:
     cell_types: np.ndarray  # (n_cells,) int32, 1-based cell-table ids
     cell_table: list[CellType] = field(default_factory=list)
     internal_face_ids: np.ndarray = field(default_factory=lambda: np.empty(0, np.int64))
+    interface_faces: list[tuple[str, str, np.ndarray]] = field(
+        default_factory=list
+    )  # (region_a, region_b, global gph face ids) with a != b
     boundary_regions: list[BoundaryRegion] = field(default_factory=list)
     default_face_ids: np.ndarray = field(default_factory=lambda: np.empty(0, np.int64))
     n_faces: int = 0
@@ -211,6 +214,7 @@ def build_model(
     regions: Optional[dict] = None,
     boundary_types: Optional[dict[str, str]] = None,
     force_material: Optional[str] = None,
+    split_regions: bool = False,
 ) -> CcmModel:
     """Assemble the CCM mesh model from a ``parse_gph_mesh`` result."""
     vertices = np.asarray(mesh["vertices"], dtype=np.float64)
@@ -225,13 +229,48 @@ def build_model(
     boundary_regions, default_ids = build_boundary_regions(mesh, boundary_types)
 
     neigh = np.asarray(ld["neighbor"], dtype=np.int64)
+    owner = np.asarray(ld["owner"], dtype=np.int64)
     internal_ids = np.flatnonzero(neigh >= 0).astype(np.int64)
+
+    interface_faces = []
+    if split_regions:
+        # Internal faces whose two cells belong to different cell types are
+        # the region interfaces.  They must not stay in the CCM internal-face
+        # set: STAR-CCM+ would otherwise merge the two fluid regions into
+        # one.  Each such face is written later as a pair of boundary faces
+        # (one per side) plus an "[Interface N]" surface pair (convert.py).
+        label_of = {ct.id: ct.label for ct in cell_table}
+        if internal_ids.size and label_of:
+            o_ct = cell_types[owner[internal_ids]]
+            n_ct = cell_types[neigh[internal_ids]]
+            cross = o_ct != n_ct
+            iface_ids = internal_ids[cross]
+            internal_ids = internal_ids[~cross]
+            lo = np.minimum(o_ct[cross], n_ct[cross]).astype(np.int64)
+            hi = np.maximum(o_ct[cross], n_ct[cross]).astype(np.int64)
+            n_types = max(len(cell_table), 1)
+            key = lo * (n_types + 1) + hi
+            order = np.argsort(key, kind="stable")
+            key = key[order]
+            iface_ids = iface_ids[order]
+            bounds = np.flatnonzero(np.concatenate(
+                [[True], key[1:] != key[:-1], [True]]
+            ))
+            interface_faces = [
+                (
+                    label_of[int(lo[order[b]])],
+                    label_of[int(hi[order[b]])],
+                    iface_ids[b:e],
+                )
+                for b, e in zip(bounds[:-1], bounds[1:])
+            ]
 
     return CcmModel(
         vertices=vertices,
         cell_types=cell_types,
         cell_table=cell_table,
         internal_face_ids=internal_ids,
+        interface_faces=interface_faces,
         boundary_regions=boundary_regions,
         default_face_ids=default_ids,
         n_faces=int(ld["n_faces"]),

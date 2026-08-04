@@ -76,6 +76,14 @@ def main(argv: list[str] | None = None) -> int:
         "(can reduce STAR-CCM+ import/reorder time on large meshes)",
     )
     parser.add_argument(
+        "--split-fluid-regions",
+        action="store_true",
+        help="keep multiple fluid cell types as independent STAR-CCM+ "
+        "regions: write per-region cell maps, move cross-region faces to "
+        "per-side boundary patches and add '[Interface N]' grid-interface "
+        "surfaces (default: all fluid cell types merge into one region)",
+    )
+    parser.add_argument(
         "--title",
         default=None,
         help="file title stored in the CCM header (default: gph stem)",
@@ -115,6 +123,7 @@ def main(argv: list[str] | None = None) -> int:
                 None if args.cell_topology == "none" else args.cell_topology
             ),
             reorder=None if args.reorder == "none" else args.reorder,
+            split_regions=args.split_fluid_regions,
             verbose=not args.quiet,
         )
     except Exception as exc:  # keep CLI output tidy

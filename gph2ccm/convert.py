@@ -88,6 +88,80 @@ def _face_starts(ld: dict, face_ids: np.ndarray) -> np.ndarray:
     return starts
 
 
+def face_centroids_and_normals(ld: dict, vertices: np.ndarray):
+    """Per-face centroid and signed area vector (Newell) for every GPH face."""
+    npe = np.asarray(ld["npe"], dtype=np.int64)
+    offs = np.asarray(ld["face_offsets"], dtype=np.int64)
+    fn = np.asarray(ld["face_nodes"], dtype=np.int64)
+    coords = np.asarray(vertices, dtype=np.float64)
+    p = coords[fn]
+    n = int(ld["n_faces"])
+    face_len = np.repeat(npe, npe)
+    face_start = np.repeat(offs[:-1], npe)
+    pos = np.arange(fn.size) - face_start
+    nxt_pos = np.where(pos + 1 < face_len, pos + 1, 0)
+    q = coords[fn[face_start + nxt_pos]]
+    cross = np.cross(p, q)
+    area_vec = 0.5 * np.add.reduceat(cross, offs[:-1])
+    fc = np.add.reduceat(p, offs[:-1]) / npe[:, None]
+    return fc, area_vec
+
+
+def cell_centroids(ld: dict, n_cells: int, face_centroids: np.ndarray) -> np.ndarray:
+    """Cell centroid as the mean of its face centroids."""
+    owner = np.asarray(ld["owner"], dtype=np.int64)
+    neigh = np.asarray(ld["neighbor"], dtype=np.int64)
+    csum = np.zeros((n_cells, 3))
+    np.add.at(csum, owner, face_centroids)
+    valid = neigh >= 0
+    np.add.at(csum, neigh[valid], face_centroids[valid])
+    cnt = np.bincount(
+        np.concatenate([owner, neigh[valid]]), minlength=n_cells
+    )
+    return csum / np.maximum(cnt[:, None], 1)
+
+
+def orient_interface_streams(
+    stream: np.ndarray,
+    face_ids: np.ndarray,
+    ld: dict,
+    owners_a: np.ndarray,
+    owners_b: np.ndarray,
+    centroids: np.ndarray,
+    area_vec: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Return two face streams oriented outward from side A / side B.
+
+    Side A's copy has its normal pointing from cell A toward cell B, side B's
+    copy points the opposite way.  Faces whose GPH winding is already correct
+    are kept unchanged; the other side is reversed.
+    """
+    face_ids = np.asarray(face_ids, dtype=np.int64)
+    d = centroids[owners_b] - centroids[owners_a]
+    dot = np.einsum("ij,ij->i", area_vec[face_ids], d)
+    rev_a = dot < 0
+    rev_b = dot > 0
+
+    def _rev(mask: np.ndarray) -> np.ndarray:
+        out = stream.copy()
+        npe = np.asarray(ld["npe"], dtype=np.int64)[face_ids]
+        offs = _face_starts(ld, face_ids)
+        for i in np.flatnonzero(mask):
+            s = int(offs[i])
+            e = s + 1 + int(npe[i])
+            seg = out[s + 1 : e]
+            out[s + 1 : e] = seg[::-1]
+        return out
+
+    return _rev(rev_a), _rev(rev_b)
+
+
+def _short_label(label: str) -> str:
+    """Shorten a cell-type label for 32-char CCM boundary labels."""
+    s = label.replace("_domain", "")
+    return s[:16]
+
+
 class CcmMeshWriter:
     """Write a :class:`CcmModel` to a legacy ``.ccm`` file via CCMIO."""
 
@@ -100,6 +174,7 @@ class CcmMeshWriter:
         chunk_vertices: int = DEFAULT_CHUNK_VERTICES,
         chunk_faces: int = DEFAULT_CHUNK_FACES,
         cell_topology: Optional[str] = None,
+        split_regions: bool = False,
         verbose: bool = True,
     ):
         self.ccmio = ccmio
@@ -108,6 +183,7 @@ class CcmMeshWriter:
         self.chunk_vertices = chunk_vertices
         self.chunk_faces = chunk_faces
         self.cell_topology = cell_topology
+        self.split_regions = split_regions
         self.verbose = verbose
 
     def _log(self, msg: str) -> None:
@@ -137,12 +213,13 @@ class CcmMeshWriter:
         face_ids: np.ndarray,
         stream: np.ndarray,
         cells: np.ndarray,
+        with_cells: bool = True,
     ) -> None:
         # NOTE: same ccmio.dll limitation as _write_vertices.  The face
         # vertex stream is 1-D so chunked writes are safe, but the internal
         # face-cells array is [2][n] and chunked writes land at half the
         # intended offset.  Write the whole face-cells array in one call.
-        if cells.size:
+        if with_cells and cells.size:
             self.ccmio.write_face_cells(node, which, map_id, cells)
         n = int(face_ids.size)
         if n == 0:
@@ -155,6 +232,126 @@ class CcmMeshWriter:
             self.ccmio.write_faces(
                 node, which, map_id, int(stream.size), stream[e0:e1], e0, e1
             )
+
+    def _write_boundary_patch(
+        self,
+        root,
+        topology,
+        problem,
+        region_id: int,
+        map_name: str,
+        label: str,
+        ld: dict,
+        face_ids: np.ndarray,
+        stream: np.ndarray,
+        cells: Optional[np.ndarray],
+        map_values: Optional[np.ndarray] = None,
+    ) -> None:
+        map_data = (
+            np.asarray(map_values, dtype=np.int32)
+            if map_values is not None
+            else (np.asarray(face_ids, dtype=np.int64) + 1).astype(np.int32)
+        )
+        region_map = self._add_map(root, map_name, map_data)
+        region_node = self.ccmio.new_indexed_entity(
+            topology, K_CCMIO_BOUNDARY_FACES, region_id, label
+        )
+        self._write_face_group(
+            region_node,
+            K_CCMIO_BOUNDARY_FACES,
+            region_map,
+            ld,
+            face_ids,
+            stream,
+            cells if cells is not None else np.empty(0, np.int32),
+            with_cells=cells is not None,
+        )
+        pnode = self.ccmio.new_indexed_entity(
+            problem, K_CCMIO_BOUNDARY_REGION, region_id, label
+        )
+        self.ccmio.write_optstr(pnode, "Label", label[:32])
+        self.ccmio.write_optstr(pnode, "BoundaryType", "wall")
+
+    def _write_region_cell_maps(self, root, model: CcmModel) -> None:
+        for ct in model.cell_table:
+            cell_idx = np.flatnonzero(model.cell_types == ct.id)
+            if cell_idx.size == 0:
+                continue
+            map_data = (cell_idx + 1).astype(np.int32)
+            map_id = self.ccmio.new_entity(
+                root, K_CCMIO_MAP, f"Region Cell Map {ct.label}"
+            )
+            self.ccmio.write_map(map_id, map_data, int(map_data.max()))
+
+    def _write_interfaces(self, root, topology, problem, model, ld) -> None:
+        if not model.interface_faces:
+            return
+        self._log(
+            f"[gph2ccm] writing {len(model.interface_faces)} region interface(s) ..."
+        )
+        fc, area_vec = face_centroids_and_normals(ld, model.vertices)
+        centroids = cell_centroids(ld, model.n_cells, fc)
+        owner_all = np.asarray(ld["owner"], dtype=np.int64)
+        neigh_all = np.asarray(ld["neighbor"], dtype=np.int64)
+        n_faces = int(ld["n_faces"])
+
+        used_ids = {0}
+        used_ids.update(r.id for r in model.boundary_regions)
+        rid = max(used_ids) + 1
+
+        for k, (label_a, label_b, fids) in enumerate(
+            model.interface_faces, start=1
+        ):
+            fids = np.asarray(fids, dtype=np.int64)
+            short_a = _short_label(label_a)
+            short_b = _short_label(label_b)
+            base_a = f"{short_a}_to_{short_b}"
+            base_b = f"{short_b}_to_{short_a}"
+            ct_a = next(ct.id for ct in model.cell_table if ct.label == label_a)
+            owner = owner_all[fids]
+            neigh = neigh_all[fids]
+            side_a = np.where(model.cell_types[owner] == ct_a, owner, neigh)
+            side_b = np.where(model.cell_types[owner] == ct_a, neigh, owner)
+            stream = face_stream(ld, fids)
+            a_stream, b_stream = orient_interface_streams(
+                stream, fids, ld, side_a, side_b, centroids, area_vec
+            )
+            self._log(
+                f"[gph2ccm]   interface {k}: {label_a} <-> {label_b} "
+                f"({fids.size} faces)"
+            )
+
+            # per-side volume patches (close the cells, carry owner data)
+            self._write_boundary_patch(
+                root, topology, problem, rid,
+                f"Boundary Face Map {label_a}:{base_a}", base_a,
+                ld, fids, a_stream, side_a + 1,
+            )
+            rid += 1
+            self._write_boundary_patch(
+                root, topology, problem, rid,
+                f"Boundary Face Map {label_b}:{base_b}", base_b,
+                ld, fids, b_stream, side_b + 1,
+            )
+            rid += 1
+
+            # grid-interface surface pair (no cell data), one per side
+            self._write_boundary_patch(
+                root, topology, problem, rid,
+                f"Boundary Face Map {label_a}:{base_a} [Interface {k}]",
+                f"{base_a} [Interface {k}]",
+                ld, fids, a_stream, None,
+                map_values=fids + 1 + n_faces,
+            )
+            rid += 1
+            self._write_boundary_patch(
+                root, topology, problem, rid,
+                f"Boundary Face Map {label_b}:{base_b} [Interface {k}]",
+                f"{base_b} [Interface {k}]",
+                ld, fids, b_stream, None,
+                map_values=fids + 1 + 2 * n_faces,
+            )
+            rid += 1
 
     def write(self, model: CcmModel, ld: dict) -> None:
         ccmio = self.ccmio
@@ -173,6 +370,10 @@ class CcmMeshWriter:
         state = ccmio.new_state(root, "default", "gph2ccm")
         processor = ccmio.new_processor(state)
         ccmio.clear_processor(state, processor)
+        problem = ccmio.new_entity(root, K_CCMIO_PROBLEM_DESCRIPTION, "gph2ccm mesh")
+
+        if self.split_regions:
+            self._write_region_cell_maps(root, model)
 
         # -- vertices -----------------------------------------------------
         self._log("[gph2ccm] writing vertices ...")
@@ -289,9 +490,11 @@ class CcmMeshWriter:
                 cells,
             )
 
+        if self.split_regions:
+            self._write_interfaces(root, topology, problem, model, ld)
+
         # -- problem description -------------------------------------------
         self._log("[gph2ccm] writing problem description ...")
-        problem = ccmio.new_entity(root, K_CCMIO_PROBLEM_DESCRIPTION, "gph2ccm mesh")
         for ct in model.cell_table:
             node = ccmio.new_indexed_entity(
                 problem, K_CCMIO_CELL_TYPE, ct.id, ct.label
@@ -336,6 +539,7 @@ def convert_gph(
     chunk_faces: int = DEFAULT_CHUNK_FACES,
     cell_topology: Optional[str] = None,
     reorder: Optional[str] = None,
+    split_regions: bool = False,
     verify: bool = False,
     force_material: Optional[str] = None,
     verbose: bool = True,
@@ -360,6 +564,7 @@ def convert_gph(
         chunk_faces=chunk_faces,
         cell_topology=cell_topology,
         reorder=reorder,
+        split_regions=split_regions,
         verify=verify,
         force_material=force_material,
         verbose=verbose,
@@ -380,6 +585,7 @@ def convert_model(
     chunk_faces: int = DEFAULT_CHUNK_FACES,
     cell_topology: Optional[str] = None,
     reorder: Optional[str] = None,
+    split_regions: bool = False,
     verify: bool = False,
     force_material: Optional[str] = None,
     verbose: bool = True,
@@ -395,7 +601,10 @@ def convert_model(
     if reorder:
         mesh = apply_mesh_reorder(mesh, reorder, verbose=verbose)
 
-    model = build_model(mesh, regions, boundary_types, force_material)
+    model = build_model(
+        mesh, regions, boundary_types, force_material,
+        split_regions=split_regions,
+    )
     if verbose:
         print(
             f"[gph2ccm] model: {model.n_cells} cells, "
@@ -429,6 +638,7 @@ def convert_model(
         chunk_vertices=chunk_vertices,
         chunk_faces=chunk_faces,
         cell_topology=cell_topology,
+        split_regions=split_regions,
         verbose=verbose,
     )
     writer.write(model, mesh["link_data"])

@@ -11,7 +11,7 @@ public class ImportCcmCheck extends StarMacro
     @Override
     public void execute()
     {
-        String path = "D:\\training\\cgns\\gph2ccm\\tests\\laptop_thermal_steady_scaled_v3_fanonly_fixed.ccm";
+        String path = "D:\\training\\cgns\\gph2ccm\\tests\\two_region.ccm";
         Simulation simulation = null;
         try
         {
@@ -24,6 +24,14 @@ public class ImportCcmCheck extends StarMacro
         System.out.println("IMPORT_START " + path);
         simulation.getImportManager().importMeshFiles(new String[] { path });
         System.out.println("IMPORT_DONE");
+
+        for (Object iface : simulation.getInterfaceManager().getInterfaces())
+        {
+            System.out.println(
+                "INTERFACE " + iface.getClass().getSimpleName()
+                + " " + iface.toString()
+            );
+        }
 
         FvRepresentation fvRepresentation = (FvRepresentation)
             simulation.getRepresentationManager().getDefaultFvRepresentation();
