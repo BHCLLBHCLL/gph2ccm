@@ -1,0 +1,351 @@
+﻿{
+  "path": "tests\\laptop_thermal_steady_scaled_v3_fanonly.ccm",
+  "version": 20625,
+  "problem": {
+    "cell_types": {
+      "1": {
+        "label": "air_domain",
+        "material": "fluid",
+        "porosity": null,
+        "spin": null,
+        "group": null,
+        "shell": null,
+        "children": [
+          "",
+          ""
+        ]
+      },
+      "2": {
+        "label": "case1",
+        "material": "solid",
+        "porosity": null,
+        "spin": null,
+        "group": null,
+        "shell": null,
+        "children": [
+          "",
+          ""
+        ]
+      },
+      "3": {
+        "label": "rotation1",
+        "material": "fluid",
+        "porosity": null,
+        "spin": null,
+        "group": null,
+        "shell": null,
+        "children": [
+          "",
+          ""
+        ]
+      }
+    },
+    "boundary_regions": {
+      "1": {
+        "label": "open",
+        "type": "pressure",
+        "children": [
+          "",
+          ""
+        ]
+      },
+      "2": {
+        "label": "@PartSurface_rotation1",
+        "type": "wall",
+        "children": [
+          "",
+          ""
+        ]
+      }
+    },
+    "children": [
+      "",
+      "",
+      "",
+      "",
+      "",
+      ""
+    ]
+  },
+  "title": "ADF MotherNode",
+  "root_children": [
+    {
+      "name": ""
+    },
+    {
+      "name": ""
+    },
+    {
+      "name": ""
+    },
+    {
+      "name": ""
+    },
+    {
+      "name": ""
+    },
+    {
+      "name": ""
+    }
+  ],
+  "maps": {
+    "Map-1": {
+      "n": 3770537,
+      "min": 1,
+      "max": 3770537,
+      "n_unique": 3770537,
+      "linear_1n": true,
+      "has_zero": false,
+      "has_negative": false,
+      "max_id": 3770537
+    },
+    "Map-2": {
+      "n": 3335405,
+      "min": 1,
+      "max": 3335405,
+      "n_unique": 3335405,
+      "linear_1n": true,
+      "has_zero": false,
+      "has_negative": false,
+      "max_id": 3335405
+    },
+    "Map-3": {
+      "n": 10311435,
+      "min": 3,
+      "max": 10442554,
+      "n_unique": 10311435,
+      "linear_1n": false,
+      "has_zero": false,
+      "has_negative": false,
+      "max_id": 10442554
+    },
+    "Map-4": {
+      "n": 17746,
+      "min": 1,
+      "max": 10443114,
+      "n_unique": 17746,
+      "linear_1n": false,
+      "has_zero": false,
+      "has_negative": false,
+      "max_id": 10443114
+    },
+    "Map-5": {
+      "n": 113933,
+      "min": 387518,
+      "max": 10250355,
+      "n_unique": 113933,
+      "linear_1n": false,
+      "has_zero": false,
+      "has_negative": false,
+      "max_id": 10250355
+    }
+  },
+  "vertices": {
+    "dims": 3,
+    "scale": 0.0010000000474974513,
+    "n": 3770537,
+    "map": "Map-1",
+    "bbox_min": [
+      -261.8000183105469,
+      -142.99896240234375,
+      -234.0
+    ],
+    "bbox_max": [
+      274.1999816894531,
+      141.0010528564453,
+      275.0
+    ],
+    "n_nan": 0,
+    "children": [
+      "",
+      "",
+      "",
+      "",
+      ""
+    ]
+  },
+  "state": {
+    "problem_type": 6,
+    "processors": [
+      {
+        "vertices": "Vertices-1",
+        "topology": "FaceBasedTopology-1",
+        "children": [
+          "",
+          "",
+          "",
+          "",
+          ""
+        ]
+      }
+    ]
+  },
+  "topology_children": [
+    "",
+    "",
+    "",
+    "",
+    "",
+    ""
+  ],
+  "cells": {
+    "n": 3335405,
+    "map": "Map-2",
+    "cell_type_ids": {
+      "min": 1,
+      "max": 3,
+      "hist": {}
+    },
+    "topology": {
+      "present": false
+    },
+    "children": [
+      "",
+      "",
+      "",
+      ""
+    ]
+  },
+  "internal_faces": {
+    "n": 10311435,
+    "max_id": 10442554,
+    "map": "Map-3",
+    "stream_size": 52049231,
+    "n_faces_parsed": 10311435,
+    "n_expected": 10311435,
+    "npe_min": 4,
+    "npe_max": 8,
+    "npe_hist": {
+      "4": 9848036,
+      "5": 437048,
+      "6": 24071,
+      "7": 2254,
+      "8": 26
+    },
+    "n_lt3": 0,
+    "vids_min": 1,
+    "vids_max": 3770537,
+    "n_duplicate_vid_in_face": 3132629,
+    "face_cells": {
+      "n": 10311435,
+      "width": 2,
+      "min": 1,
+      "max": 3327235,
+      "n_zero": 0,
+      "n_negative": 0,
+      "n_self_adjacent": 0
+    },
+    "prostar_face_id": {
+      "present": false
+    },
+    "children": [
+      "",
+      "",
+      "",
+      "",
+      ""
+    ],
+    "region_face_counts": {
+      "per_cell_min": 0,
+      "per_cell_max": 42,
+      "per_cell_hist": {},
+      "n_cells_lt4_faces": 1613903
+    }
+  },
+  "boundary_faces": {
+    "1": {
+      "n": 17746,
+      "max_id": 10443114,
+      "map": "Map-4",
+      "map_stats": {
+        "n": 17746,
+        "min": 1,
+        "max": 10443114,
+        "n_unique": 17746,
+        "linear_1n": false,
+        "has_zero": false,
+        "has_negative": false
+      },
+      "stream_size": 88730,
+      "n_faces_parsed": 17746,
+      "n_expected": 17746,
+      "npe_min": 4,
+      "npe_max": 4,
+      "npe_hist": {
+        "4": 17746
+      },
+      "n_lt3": 0,
+      "vids_min": 1,
+      "vids_max": 3770537,
+      "n_duplicate_vid_in_face": 2969,
+      "face_cells": {
+        "n": 17746,
+        "width": 1,
+        "min": 1,
+        "max": 3335405,
+        "n_zero": 0,
+        "n_negative": 0,
+        "n_self_adjacent": null
+      },
+      "prostar_face_id": {
+        "present": false
+      },
+      "children": [
+        "",
+        "",
+        "",
+        "",
+        ""
+      ]
+    },
+    "2": {
+      "n": 113933,
+      "max_id": 10250355,
+      "map": "Map-5",
+      "map_stats": {
+        "n": 113933,
+        "min": 387518,
+        "max": 10250355,
+        "n_unique": 113933,
+        "linear_1n": false,
+        "has_zero": false,
+        "has_negative": false
+      },
+      "stream_size": 573557,
+      "n_faces_parsed": 113933,
+      "n_expected": 113933,
+      "npe_min": 4,
+      "npe_max": 7,
+      "npe_hist": {
+        "4": 110188,
+        "5": 3620,
+        "6": 103,
+        "7": 22
+      },
+      "n_lt3": 0,
+      "vids_min": 138466,
+      "vids_max": 3705871,
+      "n_duplicate_vid_in_face": 39128,
+      "face_cells": {
+        "n": 113933,
+        "width": 1,
+        "min": 125281,
+        "max": 3273896,
+        "n_zero": 0,
+        "n_negative": 0,
+        "n_self_adjacent": null
+      },
+      "prostar_face_id": {
+        "present": false
+      },
+      "children": [
+        "",
+        "",
+        "",
+        "",
+        ""
+      ]
+    }
+  },
+  "elapsed_s": 17.4
+}

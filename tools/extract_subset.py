@@ -119,14 +119,20 @@ def main() -> int:
     gph = Path(sys.argv[1])
     n_cells = int(sys.argv[2])
     out = Path(sys.argv[3])
+    reorder = len(sys.argv) > 4 and sys.argv[4] == "rcm"
     import gph2cgns
 
     mesh = gph2cgns.parse_gph_mesh(str(gph))
     sub = extract_subset(mesh, n_cells)
-    convert_model(sub, out, title=f"subset-{n_cells}", verbose=True)
+    convert_model(
+        sub,
+        out,
+        title=f"subset-{n_cells}",
+        reorder="rcm" if reorder else None,
+        verbose=True,
+    )
     return 0
 
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

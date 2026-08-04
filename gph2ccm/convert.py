@@ -120,13 +120,13 @@ class CcmMeshWriter:
         return map_id
 
     def _write_vertices(self, node, map_id, vertices_mm: np.ndarray) -> None:
-        n = vertices_mm.shape[0]
+        # NOTE: the CCMIO 2D block-write path used by the STAR-CCM+ ccmio.dll
+        # misplaces chunks: for a [3][n] array it treats start/end as flat
+        # element offsets, so a chunk beginning at vertex s lands at offset s
+        # instead of 3*s.  Write the array in one call (matches the libccmio
+        # reference writer) to avoid corrupting vertex coordinates.
         flat = np.ascontiguousarray(vertices_mm.reshape(-1))
-        for s in range(0, n, self.chunk_vertices):
-            e = min(n, s + self.chunk_vertices)
-            self.ccmio.write_vertices(
-                node, map_id, flat[3 * s : 3 * e], 0.001, s, e
-            )
+        self.ccmio.write_vertices(node, map_id, flat, 0.001, 0, None)
 
     def _write_face_group(
         self,
@@ -138,6 +138,12 @@ class CcmMeshWriter:
         stream: np.ndarray,
         cells: np.ndarray,
     ) -> None:
+        # NOTE: same ccmio.dll limitation as _write_vertices.  The face
+        # vertex stream is 1-D so chunked writes are safe, but the internal
+        # face-cells array is [2][n] and chunked writes land at half the
+        # intended offset.  Write the whole face-cells array in one call.
+        if cells.size:
+            self.ccmio.write_face_cells(node, which, map_id, cells)
         n = int(face_ids.size)
         if n == 0:
             return
@@ -148,9 +154,6 @@ class CcmMeshWriter:
             e1 = int(starts[i1]) if i1 < n else int(stream.size)
             self.ccmio.write_faces(
                 node, which, map_id, int(stream.size), stream[e0:e1], e0, e1
-            )
-            self.ccmio.write_face_cells(
-                node, which, map_id, cells[i0:i1], i0, i1
             )
 
     def write(self, model: CcmModel, ld: dict) -> None:
@@ -332,6 +335,7 @@ def convert_gph(
     chunk_vertices: int = DEFAULT_CHUNK_VERTICES,
     chunk_faces: int = DEFAULT_CHUNK_FACES,
     cell_topology: Optional[str] = None,
+    reorder: Optional[str] = None,
     verify: bool = False,
     force_material: Optional[str] = None,
     verbose: bool = True,
@@ -355,6 +359,7 @@ def convert_gph(
         chunk_vertices=chunk_vertices,
         chunk_faces=chunk_faces,
         cell_topology=cell_topology,
+        reorder=reorder,
         verify=verify,
         force_material=force_material,
         verbose=verbose,
@@ -374,6 +379,7 @@ def convert_model(
     chunk_vertices: int = DEFAULT_CHUNK_VERTICES,
     chunk_faces: int = DEFAULT_CHUNK_FACES,
     cell_topology: Optional[str] = None,
+    reorder: Optional[str] = None,
     verify: bool = False,
     force_material: Optional[str] = None,
     verbose: bool = True,
@@ -385,6 +391,9 @@ def convert_model(
 
     if boundary_types is None and regions and "boundary_types" in regions:
         boundary_types = {str(k): str(v) for k, v in regions["boundary_types"].items()}
+
+    if reorder:
+        mesh = apply_mesh_reorder(mesh, reorder, verbose=verbose)
 
     model = build_model(mesh, regions, boundary_types, force_material)
     if verbose:
@@ -440,3 +449,23 @@ def convert_model(
         size_mb = out_path.stat().st_size / 1e6
         print(f"[gph2ccm] done: {out_path} ({size_mb:.1f} MB)")
     return out_path
+
+
+def apply_mesh_reorder(mesh: dict, mode: str, verbose: bool = True) -> dict:
+    """Renumber cells (RCM) so the STAR-CCM+ import reorder has less work."""
+    if mode != "rcm":
+        raise ValueError(f"unsupported reorder mode: {mode}")
+    from .reorder import apply_cell_order, rcm_order
+
+    ld = mesh["link_data"]
+    owner = ld["owner"]
+    neigh = ld["neighbor"]
+    n_cells = int(ld["n_cells"])
+    boundary_cells = owner[np.asarray(ld["boundary_faces"], dtype=np.int64)]
+    t0 = time.perf_counter()
+    if verbose:
+        print("[gph2ccm] computing RCM cell order ...")
+    perm = rcm_order(owner, neigh, n_cells, boundary_cells)
+    if verbose:
+        print(f"[gph2ccm] RCM order done [{time.perf_counter() - t0:.1f}s]")
+    return apply_cell_order(mesh, perm)

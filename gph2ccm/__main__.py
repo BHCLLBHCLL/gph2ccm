@@ -69,6 +69,13 @@ def main(argv: list[str] | None = None) -> int:
         "'none' omits the field entirely.",
     )
     parser.add_argument(
+        "--reorder",
+        choices=("none", "rcm"),
+        default="none",
+        help="renumber cells with reverse Cuthill-McKee before writing "
+        "(can reduce STAR-CCM+ import/reorder time on large meshes)",
+    )
+    parser.add_argument(
         "--title",
         default=None,
         help="file title stored in the CCM header (default: gph stem)",
@@ -107,6 +114,7 @@ def main(argv: list[str] | None = None) -> int:
             cell_topology=(
                 None if args.cell_topology == "none" else args.cell_topology
             ),
+            reorder=None if args.reorder == "none" else args.reorder,
             verbose=not args.quiet,
         )
     except Exception as exc:  # keep CLI output tidy
