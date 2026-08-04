@@ -11,7 +11,7 @@ public class ImportCcmCheck extends StarMacro
     @Override
     public void execute()
     {
-        String path = "D:\\training\\cgns\\gph2ccm\\tests\\two_region.ccm";
+        String path = "D:\\training\\cgns\\gph2ccm\\tests\\bladerotating_dm2.ccm";
         Simulation simulation = null;
         try
         {
@@ -25,7 +25,7 @@ public class ImportCcmCheck extends StarMacro
         simulation.getImportManager().importMeshFiles(new String[] { path });
         System.out.println("IMPORT_DONE");
 
-        for (Object iface : simulation.getInterfaceManager().getInterfaces())
+        for (Object iface : simulation.getInterfaceManager().getObjects())
         {
             System.out.println(
                 "INTERFACE " + iface.getClass().getSimpleName()
