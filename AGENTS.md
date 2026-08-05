@@ -28,6 +28,13 @@ Package import name: `gph2ccm`. CLI: `python -m gph2ccm`.
   must be written in a **single** `CCMIOWrite*` call: the bundled
   `ccmio.dll` misplaces chunked 2-D writes (start/end treated as flat
   offsets), which corrupts cell connectivity and hangs STAR-CCM+ import.
+- `--split-fluid-regions` keeps multiple fluid cell types as independent
+  regions: write `GroupId`/`MaterialId` on CellType, `Region Cell Map
+  <label>` maps, per-side boundary patches for cross-region faces, and the
+  root `InterfaceDefinitions` node (`Interface-N` with `Name`,
+  `Boundary0`/`Boundary1`, `Configuration=IN_PLACE`,
+  `ConditionType=InternalInterface`) — this mirrors STAR-CCM+ exports such
+  as `tests/bladerotating_dm2.ccm`.
 - `CCMIOID` is `{CCMIONode root; CCMIONode node; int id; int type; int version;}`
   (ctypes layout in `ccmio.py`).
 - Large samples live under `tests/` and are gitignored.

@@ -298,6 +298,7 @@ class CcmMeshWriter:
         used_ids = {0}
         used_ids.update(r.id for r in model.boundary_regions)
         rid = max(used_ids) + 1
+        records = []
 
         for k, (label_a, label_b, fids) in enumerate(
             model.interface_faces, start=1
@@ -320,20 +321,20 @@ class CcmMeshWriter:
                 f"[gph2ccm]   interface {k}: {label_a} <-> {label_b} "
                 f"({fids.size} faces)"
             )
+            b0, b1 = rid, rid + 1
 
             # per-side volume patches (close the cells, carry owner data)
             self._write_boundary_patch(
-                root, topology, problem, rid,
+                root, topology, problem, b0,
                 f"Boundary Face Map {label_a}:{base_a}", base_a,
                 ld, fids, a_stream, side_a + 1,
             )
-            rid += 1
             self._write_boundary_patch(
-                root, topology, problem, rid,
+                root, topology, problem, b1,
                 f"Boundary Face Map {label_b}:{base_b}", base_b,
                 ld, fids, b_stream, side_b + 1,
             )
-            rid += 1
+            rid = b1 + 1
 
             # grid-interface surface pair (no cell data), one per side
             self._write_boundary_patch(
@@ -352,6 +353,33 @@ class CcmMeshWriter:
                 map_values=fids + 1 + 2 * n_faces,
             )
             rid += 1
+
+            records.append((f"Interface {k}", b0, b1))
+
+        self._write_interface_definitions(root, records)
+
+    def _write_interface_definitions(self, root, records) -> None:
+        """Write the STAR-CCM+ ``InterfaceDefinitions`` node (root child).
+
+        Mirrors the structure written by STAR-CCM+ itself (see
+        ``bladerotating_dm2.ccm``): one ``Interface-N`` node per interface
+        with ``Name``, ``Boundary0``/``Boundary1`` (boundary-region ids of
+        the two per-side patches), ``Configuration`` and ``ConditionType``.
+        """
+        if not records:
+            return
+        idf = self.ccmio.create_node(
+            root.node, "InterfaceDefinitions", "InterfaceDefinitions"
+        )
+        for k, (name, b0, b1) in enumerate(records):
+            iface = self.ccmio.create_node(idf, f"Interface-{k}", "Interface")
+            self.ccmio.write_nodestr(iface, "Name", name)
+            self.ccmio.write_nodei(iface, "Boundary0", b0)
+            self.ccmio.write_nodei(iface, "Boundary1", b1)
+            self.ccmio.write_nodestr(iface, "Configuration", "IN_PLACE")
+            self.ccmio.write_nodestr(
+                iface, "ConditionType", "InternalInterface"
+            )
 
     def write(self, model: CcmModel, ld: dict) -> None:
         ccmio = self.ccmio
@@ -495,12 +523,18 @@ class CcmMeshWriter:
 
         # -- problem description -------------------------------------------
         self._log("[gph2ccm] writing problem description ...")
-        for ct in model.cell_table:
+        # Each cell type becomes one STAR-CCM+ region when split_regions is
+        # enabled: the importer keys regions on the CellType "GroupId"
+        # (STAR-CCM+ exports write GroupId 1..N and a matching
+        # "Region Cell Map <label>" for every cell type).
+        for gi, ct in enumerate(model.cell_table, start=1):
             node = ccmio.new_indexed_entity(
                 problem, K_CCMIO_CELL_TYPE, ct.id, ct.label
             )
             ccmio.write_optstr(node, "Label", ct.label[:32])
             ccmio.write_optstr(node, "MaterialType", ct.material)
+            ccmio.write_opti(node, "GroupId", gi if self.split_regions else 1)
+            ccmio.write_opti(node, "MaterialId", 1 if ct.material == "fluid" else 2)
 
         if model.default_face_ids.size:
             node = ccmio.new_indexed_entity(

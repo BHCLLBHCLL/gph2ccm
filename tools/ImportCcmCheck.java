@@ -11,7 +11,7 @@ public class ImportCcmCheck extends StarMacro
     @Override
     public void execute()
     {
-        String path = "D:\\training\\cgns\\gph2ccm\\tests\\bladerotating_dm2.ccm";
+        String path = "D:\\training\\cgns\\gph2ccm\\tests\\laptop_thermal_steady_scaled_v3_fanonly_simplec_split.ccm";
         Simulation simulation = null;
         try
         {

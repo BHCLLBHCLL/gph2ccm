@@ -41,6 +41,8 @@ python -m gph2ccm mesh.gph out.ccm --verify
 | `--boundary-types JSON` | 边界区域 → CCM `BoundaryType` 覆盖，如 `{"open": "pressure"}` |
 | `--force-material fluid\|solid` | 强制所有单元材料类型（便于单区域导入） |
 | `--cell-topology none\|poly\|auto` | 显式写 `CellTopologyType`（默认 `poly=255`） |
+| `--split-fluid-regions` | 多 fluid cell type 写成独立 STAR-CCM+ region（Region Cell
+  Maps + `[Interface N]` 面 + `InterfaceDefinitions`），默认合并为一个 region |
 | `--reorder rcm` | 写出前用 RCM 重排单元编号 |
 | `--no-compress` | 跳过 `CCMIOCompress` |
 | `--backup` | 已有输出时保留为 `.ccm.bak` 而非删除 |
@@ -69,6 +71,8 @@ python -m gph2ccm mesh.gph out.ccm --verify
   写入（与 libccmio 参考 writer 一致），1-D 面流仍可分块。
   修复后 330 万单元 / 1044 万面网格可正常导入。
 - 暂不写结果场/求解设置，仅网格与问题描述（单元类型、边界区域）。
+- 多流体区域拆分（`--split-fluid-regions`）只写网格/接口，不写 MRF 等物理
+  设置；导入后需在 STAR-CCM+ 中自行添加旋转/交界面物理条件。
 
 ## 测试
 

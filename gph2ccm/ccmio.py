@@ -269,6 +269,20 @@ class CCMIO:
         self._CCMIOEntityName = bind(
             "CCMIOEntityName", ctypes.c_int, err_p, CCMIOID, char_p
         )
+        self._CCMIOSetName = bind(
+            "CCMIOSetName", ctypes.c_int, err_p, CCMIONode, char_p
+        )
+        self._CCMIOCreateNode = bind(
+            "CCMIOCreateNode", ctypes.c_int, err_p, CCMIONode, ctypes.c_int,
+            char_p, char_p, ctypes.POINTER(CCMIONode),
+        )
+        self._CCMIOWriteNodestr = bind(
+            "CCMIOWriteNodestr", ctypes.c_int, err_p, CCMIONode, char_p, char_p
+        )
+        self._CCMIOWriteNodei = bind(
+            "CCMIOWriteNodei", ctypes.c_int, err_p, CCMIONode, char_p,
+            ctypes.c_int,
+        )
         self._CCMIOGetEntityIndex = bind(
             "CCMIOGetEntityIndex", ctypes.c_int, err_p, CCMIOID, int_p
         )
@@ -530,6 +544,39 @@ class CCMIO:
         code = self._CCMIOEntityName(ctypes.byref(err), entity, buf)
         self._check(code, "CCMIOEntityName")
         return buf.value.decode("utf-8", errors="replace")
+
+    def set_name(self, entity: CCMIOID, name: str) -> None:
+        err = ctypes.c_int(K_CCMIO_NO_ERR)
+        code = self._CCMIOSetName(
+            ctypes.byref(err), entity.node, _b(name)
+        )
+        self._check(code, f"CCMIOSetName({name})")
+
+    def create_node(
+        self, parent: CCMIONode, name: str, label: str, open_dup: bool = True
+    ) -> CCMIONode:
+        err = ctypes.c_int(K_CCMIO_NO_ERR)
+        out = CCMIONode()
+        code = self._CCMIOCreateNode(
+            ctypes.byref(err), parent, int(open_dup),
+            _b(name), _b(label), ctypes.byref(out),
+        )
+        self._check(code, f"CCMIOCreateNode({name})")
+        return out
+
+    def write_nodestr(self, parent: CCMIONode, name: str, value: str) -> None:
+        err = ctypes.c_int(K_CCMIO_NO_ERR)
+        code = self._CCMIOWriteNodestr(
+            ctypes.byref(err), parent, _b(name), _b(value)
+        )
+        self._check(code, f"CCMIOWriteNodestr({name})")
+
+    def write_nodei(self, parent: CCMIONode, name: str, value: int) -> None:
+        err = ctypes.c_int(K_CCMIO_NO_ERR)
+        code = self._CCMIOWriteNodei(
+            ctypes.byref(err), parent, _b(name), value
+        )
+        self._check(code, f"CCMIOWriteNodei({name})")
 
     def entity_index(self, entity: CCMIOID) -> int:
         err = ctypes.c_int(K_CCMIO_NO_ERR)
