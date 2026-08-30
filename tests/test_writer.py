@@ -595,6 +595,85 @@ def test_fields_and_solver_metadata() -> None:
     print("test_fields_and_solver_metadata OK")
 
 
+def test_mrf_metadata() -> None:
+    """Optional, data-driven MRF (rotating reference frame) metadata."""
+    mesh = make_synthetic_gph()
+    regions = {
+        "fluid_regions": ["fluid"],
+        "mrf": [
+            {
+                "name": "rotor_frame",
+                "region": "fluid",
+                "type": "rotating",
+                "axis": [0, 0, 1],
+                "origin": [0, 0, 0],
+                "omega": 100.0,
+                "units": "rad/s",
+            },
+        ],
+    }
+    model = build_model(mesh, regions)
+    assert len(model.mrf) == 1
+
+    ccmio = CCMIO()
+    with tempfile.TemporaryDirectory(prefix="gph2ccm_mrf_") as tmp:
+        out = Path(tmp) / "mrf.ccm"
+        writer = CcmMeshWriter(ccmio, out, verbose=False)
+        writer.write(model, mesh["link_data"])
+        ccmio.compress(out)
+        verify_ccm(out, ccmio=ccmio, verbose=False)
+
+        root = ccmio.open_file_readonly(str(out))
+        try:
+            state, problem = ccmio.get_state(root)
+            assert ccmio.read_optstr(problem, "gph2ccm.MRF.rotor_frame") == (
+                "fluid|rotating|[0, 0, 1]|[0, 0, 0]|100.0|rad/s"
+            )
+            assert ccmio.read_optstr(problem, "gph2ccm.MRFNames") == "rotor_frame"
+        finally:
+            ccmio.close_file(root)
+    print("test_mrf_metadata OK")
+
+
+def test_periodic_pairing_metadata() -> None:
+    """Optional, data-driven periodic/sliding interface pairing metadata."""
+    mesh = make_synthetic_gph()
+    regions = {
+        "fluid_regions": ["fluid"],
+        "periodic": [
+            {
+                "name": "per_rot",
+                "region": "rotor_side",
+                "shadow": "stator_side",
+                "type": "rotational",
+                "axis": [0, 0, 1],
+                "angle": 15.0,
+            },
+        ],
+    }
+    model = build_model(mesh, regions)
+    assert len(model.periodic) == 1
+
+    ccmio = CCMIO()
+    with tempfile.TemporaryDirectory(prefix="gph2ccm_per_") as tmp:
+        out = Path(tmp) / "periodic.ccm"
+        writer = CcmMeshWriter(ccmio, out, verbose=False)
+        writer.write(model, mesh["link_data"])
+        ccmio.compress(out)
+        verify_ccm(out, ccmio=ccmio, verbose=False)
+
+        root = ccmio.open_file_readonly(str(out))
+        try:
+            state, problem = ccmio.get_state(root)
+            assert ccmio.read_optstr(problem, "gph2ccm.Periodic.per_rot") == (
+                "rotor_side|stator_side|rotational|[0, 0, 1]|15.0"
+            )
+            assert ccmio.read_optstr(problem, "gph2ccm.PeriodicNames") == "per_rot"
+        finally:
+            ccmio.close_file(root)
+    print("test_periodic_pairing_metadata OK")
+
+
 if __name__ == "__main__":
     test_write_and_readback()
     test_model_build_parts_and_boundaries()
@@ -604,3 +683,5 @@ if __name__ == "__main__":
     test_verify_split_no_false_positive()
     test_structured_boundary_conditions()
     test_fields_and_solver_metadata()
+    test_mrf_metadata()
+    test_periodic_pairing_metadata()

@@ -51,14 +51,14 @@
 | 13 | Solution Fields（结果场） | ⚠️ | 不写实际场数据；可经 `regions["fields"]` 写入 `gph2ccm.Field.*` **描述性**场定义 |
 | 14 | Boundary Conditions（含对称 / 周期配对） | ⚠️ | 结构化类型规范化 + `gph2ccm.BC.*` 描述性参数（`regions` JSON 驱动），仍非求解就绪 |
 | 15 | Material / Region 求解属性 | ⚠️ | 新增 `gph2ccm.Solver.*` 描述性求解设置元数据（`regions` JSON 驱动），仍非实际属性 |
-| 16 | MRF（旋转参考系） | ❌ | regions JSON 仅做 region 划分，非旋转条件 |
-| 17 | Periodic / Cyclic 配对 | ❌ | 识别类型名但**未生成界面配对** |
+| 16 | MRF（旋转参考系） | ⚠️ | 不自动施加旋转条件；可经 `regions["mrf"]` 写入 `gph2ccm.MRF.*` **描述性**旋转参考系声明 |
+| 17 | Periodic / Cyclic 配对 | ⚠️ | 不生成几何配对界面；可经 `regions["periodic"]` 写入 `gph2ccm.Periodic.*` **描述性**配对声明 |
 | 18 | 2D 网格包裹 | ❌ | 未处理 STAR-CCM+ 2D 所需的壳层 |
 | 19 | 单元 / 节点场数据 | ❌ | 无 |
 | 20 | 网格质量修复 | ❌ | 仅 `topo_check.py` 诊断，不修复 |
 | 21 | 高阶单元（2 阶） | ❌ | legacy CCM 一般不支持，未做适配 |
 
-**完整度统计**：21 项中已实现 12、部分 4、缺失 5 → **核心网格层完整覆盖，
+**完整度统计**：21 项中已实现 12、部分 6、缺失 3 → **核心网格层完整覆盖，
 物理 / 求解层进入「描述性元数据」阶段（可携带信息但非求解就绪）**。
 
 ---
@@ -122,24 +122,25 @@ Configuration=IN_PLACE / ConditionType=InternalInterface）、两侧带单元数
 
 ## 5. 关键缺口（按影响排序）
 
-> 执行进度（对应原始 8 项清单）：#8 测试 ✅、#2 边界条件结构化 ✅、#1 结果场/求解设置 ⚠️（描述性元数据载体）、#3–#7 待执行。
+> 执行进度（对应原始 8 项清单）：#8 测试 ✅、#2 边界条件结构化 ✅、#1 结果场/求解设置 ⚠️（描述性元数据载体）、#3 MRF ⚠️（描述性声明）、#4 周期/滑移配对 ⚠️（描述性声明）、#5–#7 待执行。
 
 1. **无结果场 / 求解设置** —— ⚠️ 已有描述性载体：经 `regions["fields"]` / `regions["solver_settings"]` 写入 `gph2ccm.Field.*` / `gph2ccm.Solver.*` 命名空间节点；**非实际场数据、不求解**（"keep boundary" 范围）。
 2. **边界条件仅类型名** —— ⚠️ 已结构化：`boundary_conditions` 经 `_normalize_bctype` 规范化类型 + `gph2ccm.BC.*` 描述性参数（regions JSON 驱动），仍非求解就绪。
-3. **MRF 仅 region 划分** —— 非真正的旋转参考系条件（待 #3）。
-4. **周期 / 滑移界面配对** —— 识别了类型却未生成配对面（待 #4）。
+3. **MRF 仅 region 划分** —— ⚠️ 已有描述性旋转参考系声明：经 `regions["mrf"]` 写入 `gph2ccm.MRF.*`（region/type/axis/origin/omega/units），**非真实旋转条件**。
+4. **周期 / 滑移界面配对** —— ⚠️ 已有描述性配对声明：经 `regions["periodic"]` 写入 `gph2ccm.Periodic.*`（region/shadow/type/axis/angle），**未生成几何配对界面**。
 5. **多 processor / 分布式** —— 不支持大网格并行分区写入（待 #5）。
 6. **2D 网格包裹** —— 不支持 2D 算例（待 #6）。
 7. **网格质量修复** —— 仅诊断，不修退化面 / 悬挂节点（待 #7）。
-8. **测试与 CI 薄弱** —— ✅ 已补 `tests/test_writer.py` 8 个回归用例（写回读验证、split/interface、verify 放宽、结构化 BC、字段/求解元数据）。
+8. **测试与 CI 薄弱** —— ✅ 已补 `tests/test_writer.py` 10 个回归用例（写回读验证、split/interface、verify 放宽、结构化 BC、字段/求解/MRF/周期元数据）。
 
 ---
 
 ## 6. 建议路线
 
 - **短期（保质量，低成本）**：✅ 已完成 —— H1 修复 + `verify` 在 `split_regions` 下放宽接口面唯一性 + 对应单测；结构化边界条件 + 描述性结果场/求解元数据（数据驱动、纯描述）。
-- **中期（扩广度）**：结果场写入（若上游 GPH 提供实际数据）、周期边界配对、
-  MRF 旋转条件、多 processor 分块写入（需先解决 2D 分块 bug 的 vertex 路径）。
+- **中期（扩广度）**：结果场/MRF/周期 **描述性元数据载体已落地**（数据驱动、纯描述）；
+  真正的求解属性写入（待上游 GPH 提供实际数据）、多 processor 分块写入
+  （需先解决 2D 分块 bug 的 vertex 路径）。
 - **长期（工程化）**：CI 接入 `test_writer.py` + 至少 1 个合成多 region 网格；
   在 README 明确「导入后须在 STAR-CCM+ 侧补充」的清单（材料 / 边界条件 / 场）；
   建立 `gphdecoding` 解析层与 `ccmio.dll` 行为的版本对照表。

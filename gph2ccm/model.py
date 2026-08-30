@@ -44,6 +44,8 @@ class CcmModel:
     # not a solver-ready exporter (see the "keep boundary" scope decision).
     fields: list = field(default_factory=list)  # e.g. [{"name","location","type","units"}]
     solver_settings: dict = field(default_factory=dict)  # e.g. {"turbulence_model":"k-epsilon"}
+    mrf: list = field(default_factory=list)  # rotating reference frames, descriptive
+    periodic: list = field(default_factory=list)  # periodic/sliding pairings, descriptive
 
     @property
     def n_cells(self) -> int:
@@ -299,6 +301,8 @@ def build_model(
     boundary_conditions: Optional[dict] = None,
     fields: Optional[list] = None,
     solver_settings: Optional[dict] = None,
+    mrf: Optional[list] = None,
+    periodic: Optional[list] = None,
 ) -> CcmModel:
     """Assemble the CCM mesh model from a ``parse_gph_mesh`` result."""
     vertices = np.asarray(mesh["vertices"], dtype=np.float64)
@@ -317,6 +321,10 @@ def build_model(
         fields = regions.get("fields") or []
     if solver_settings is None and regions:
         solver_settings = regions.get("solver_settings") or {}
+    if mrf is None and regions:
+        mrf = regions.get("mrf") or []
+    if periodic is None and regions:
+        periodic = regions.get("periodic") or []
     boundary_regions, default_ids = build_boundary_regions(
         mesh, boundary_types, boundary_conditions
     )
@@ -369,6 +377,8 @@ def build_model(
         n_faces=int(ld["n_faces"]),
         fields=list(fields) if fields else [],
         solver_settings=dict(solver_settings) if solver_settings else {},
+        mrf=list(mrf) if mrf else [],
+        periodic=list(periodic) if periodic else [],
     )
 
 

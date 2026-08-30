@@ -382,18 +382,22 @@ class CcmMeshWriter:
             )
 
     def _write_metadata_nodes(self, problem, model: CcmModel) -> None:
-        """Write optional, data-driven field/solver metadata as descriptive
-        namespaced opt nodes on the problem description.
+        """Write optional, data-driven descriptive metadata as namespaced opt
+        nodes on the problem description.
 
-        ``model.fields`` is a list of
-        ``{"name", "location"?, "type"?, "units"?}`` descriptors and
-        ``model.solver_settings`` an arbitrary ``{key: value}`` map.  They are
-        written verbatim under ``gph2ccm.Field.<name>`` /
-        ``gph2ccm.Solver.<key>`` (plus ``gph2ccm.FieldNames`` /
-        ``gph2ccm.SolverKeys`` index lists) so downstream tooling can recover
-        the intended setup without gph2ccm ever solving anything.
+        The following ``model`` attributes are carried over (all optional,
+        user-supplied via the regions JSON, never auto-applied):
+
+        * ``fields``         -> ``gph2ccm.Field.<name>``  (``"<loc>|<type>|<units>"``)
+        * ``solver_settings``-> ``gph2ccm.Solver.<key>``  (``str(value)``)
+        * ``mrf``            -> ``gph2ccm.MRF.<name>``    (rotating reference frame)
+        * ``periodic``      -> ``gph2ccm.Periodic.<name>`` (interface pairing)
+
+        Each group also gets a ``*Names`` / ``*Keys`` index list.  This is
+        reference metadata only -- gph2ccm never writes actual solution data
+        or turns itself into a solver-ready exporter (keep-boundary scope).
         """
-        if not (model.fields or model.solver_settings):
+        if not (model.fields or model.solver_settings or model.mrf or model.periodic):
             return
         self._log("[gph2ccm] writing descriptive field/solver metadata ...")
 
@@ -421,6 +425,51 @@ class CcmMeshWriter:
         if solver_keys:
             self.ccmio.write_optstr(
                 problem, "gph2ccm.SolverKeys", ",".join(solver_keys)
+            )
+
+        # -- rotating reference frames (descriptive) -------------------------
+        mrf_names: list[str] = []
+        for fr in model.mrf:
+            if not isinstance(fr, dict):
+                continue
+            name = fr.get("name")
+            if not name:
+                continue
+            region = fr.get("region", "")
+            ftype = fr.get("type", "rotating")
+            axis = fr.get("axis", "")
+            origin = fr.get("origin", "")
+            omega = fr.get("omega", "")
+            units = fr.get("units", "")
+            mrf_names.append(str(name))
+            self.ccmio.write_optstr(
+                problem, f"gph2ccm.MRF.{name}",
+                f"{region}|{ftype}|{axis}|{origin}|{omega}|{units}",
+            )
+        if mrf_names:
+            self.ccmio.write_optstr(problem, "gph2ccm.MRFNames", ",".join(mrf_names))
+
+        # -- periodic / cyclic / sliding pairings (descriptive) --------------
+        per_names: list[str] = []
+        for p in model.periodic:
+            if not isinstance(p, dict):
+                continue
+            name = p.get("name")
+            if not name:
+                continue
+            region = p.get("region", "")
+            shadow = p.get("shadow", "")
+            ptype = p.get("type", "rotational")
+            axis = p.get("axis", "")
+            angle = p.get("angle", p.get("translation", ""))
+            per_names.append(str(name))
+            self.ccmio.write_optstr(
+                problem, f"gph2ccm.Periodic.{name}",
+                f"{region}|{shadow}|{ptype}|{axis}|{angle}",
+            )
+        if per_names:
+            self.ccmio.write_optstr(
+                problem, "gph2ccm.PeriodicNames", ",".join(per_names)
             )
 
     def write(self, model: CcmModel, ld: dict) -> None:
@@ -695,14 +744,17 @@ def convert_model(
         boundary_conditions=regions.get("boundary_conditions") if regions else None,
         fields=regions.get("fields") if regions else None,
         solver_settings=regions.get("solver_settings") if regions else None,
+        mrf=regions.get("mrf") if regions else None,
+        periodic=regions.get("periodic") if regions else None,
     )
     if verbose:
         extra = ""
-        if model.fields or model.solver_settings:
-            extra = (
-                f", {len(model.fields)} field + "
-                f"{len(model.solver_settings)} solver metadata descriptors"
-            )
+        n_meta = (
+            len(model.fields) + len(model.solver_settings)
+            + len(model.mrf) + len(model.periodic)
+        )
+        if n_meta:
+            extra = f", {n_meta} descriptive metadata descriptors"
         print(
             f"[gph2ccm] model: {model.n_cells} cells, "
             f"{model.internal_face_ids.size} internal faces, "
