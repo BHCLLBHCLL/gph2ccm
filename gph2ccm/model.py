@@ -39,6 +39,11 @@ class CcmModel:
     boundary_regions: list[BoundaryRegion] = field(default_factory=list)
     default_face_ids: np.ndarray = field(default_factory=lambda: np.empty(0, np.int64))
     n_faces: int = 0
+    # Optional, user-supplied descriptive metadata (data-driven via regions
+    # JSON).  Never auto-applied: gph2ccm stays a mesh+description exporter,
+    # not a solver-ready exporter (see the "keep boundary" scope decision).
+    fields: list = field(default_factory=list)  # e.g. [{"name","location","type","units"}]
+    solver_settings: dict = field(default_factory=dict)  # e.g. {"turbulence_model":"k-epsilon"}
 
     @property
     def n_cells(self) -> int:
@@ -292,6 +297,8 @@ def build_model(
     force_material: Optional[str] = None,
     split_regions: bool = False,
     boundary_conditions: Optional[dict] = None,
+    fields: Optional[list] = None,
+    solver_settings: Optional[dict] = None,
 ) -> CcmModel:
     """Assemble the CCM mesh model from a ``parse_gph_mesh`` result."""
     vertices = np.asarray(mesh["vertices"], dtype=np.float64)
@@ -305,6 +312,11 @@ def build_model(
         boundary_types = regions.get("boundary_types") or None
     if boundary_conditions is None and regions:
         boundary_conditions = regions.get("boundary_conditions") or None
+    # Optional descriptive metadata (data-driven, never auto-applied).
+    if fields is None and regions:
+        fields = regions.get("fields") or []
+    if solver_settings is None and regions:
+        solver_settings = regions.get("solver_settings") or {}
     boundary_regions, default_ids = build_boundary_regions(
         mesh, boundary_types, boundary_conditions
     )
@@ -355,6 +367,8 @@ def build_model(
         boundary_regions=boundary_regions,
         default_face_ids=default_ids,
         n_faces=int(ld["n_faces"]),
+        fields=list(fields) if fields else [],
+        solver_settings=dict(solver_settings) if solver_settings else {},
     )
 
 

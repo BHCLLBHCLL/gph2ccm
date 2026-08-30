@@ -546,6 +546,55 @@ def test_structured_boundary_conditions() -> None:
     print("test_structured_boundary_conditions OK")
 
 
+def test_fields_and_solver_metadata() -> None:
+    """Optional, data-driven field & solver metadata is carried and written."""
+    mesh = make_synthetic_gph()
+    regions = {
+        "fluid_regions": ["fluid"],
+        "fields": [
+            {"name": "pressure", "location": "cell", "type": "scalar", "units": "Pa"},
+            {"name": "velocity", "location": "cell", "type": "vector", "units": "m/s"},
+        ],
+        "solver_settings": {
+            "turbulence_model": "k-epsilon",
+            "steady": True,
+        },
+    }
+    model = build_model(mesh, regions)
+
+    assert len(model.fields) == 2
+    assert model.solver_settings.get("turbulence_model") == "k-epsilon"
+    assert model.solver_settings.get("steady") is True
+
+    ccmio = CCMIO()
+    with tempfile.TemporaryDirectory(prefix="gph2ccm_fields_") as tmp:
+        out = Path(tmp) / "fields.ccm"
+        writer = CcmMeshWriter(ccmio, out, verbose=False)
+        writer.write(model, mesh["link_data"])
+        ccmio.compress(out)
+
+        # verify_ccm ignores unknown opt nodes, so the file must still pass.
+        verify_ccm(out, ccmio=ccmio, verbose=False)
+
+        root = ccmio.open_file_readonly(str(out))
+        try:
+            state, problem = ccmio.get_state(root)
+            # Each field is encoded as "<location>|<type>|<units>".
+            assert ccmio.read_optstr(problem, "gph2ccm.Field.pressure") == "cell|scalar|Pa"
+            assert ccmio.read_optstr(problem, "gph2ccm.Field.velocity") == "cell|vector|m/s"
+            assert ccmio.read_optstr(problem, "gph2ccm.FieldNames") == "pressure,velocity"
+            # Solver settings carried verbatim.
+            assert ccmio.read_optstr(problem, "gph2ccm.Solver.turbulence_model") == "k-epsilon"
+            assert ccmio.read_optstr(problem, "gph2ccm.Solver.steady") == "True"
+            assert (
+                ccmio.read_optstr(problem, "gph2ccm.SolverKeys")
+                == "turbulence_model,steady"
+            )
+        finally:
+            ccmio.close_file(root)
+    print("test_fields_and_solver_metadata OK")
+
+
 if __name__ == "__main__":
     test_write_and_readback()
     test_model_build_parts_and_boundaries()
@@ -554,3 +603,4 @@ if __name__ == "__main__":
     test_split_regions_write_and_readback()
     test_verify_split_no_false_positive()
     test_structured_boundary_conditions()
+    test_fields_and_solver_metadata()

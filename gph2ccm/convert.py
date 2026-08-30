@@ -381,6 +381,48 @@ class CcmMeshWriter:
                 iface, "ConditionType", "InternalInterface"
             )
 
+    def _write_metadata_nodes(self, problem, model: CcmModel) -> None:
+        """Write optional, data-driven field/solver metadata as descriptive
+        namespaced opt nodes on the problem description.
+
+        ``model.fields`` is a list of
+        ``{"name", "location"?, "type"?, "units"?}`` descriptors and
+        ``model.solver_settings`` an arbitrary ``{key: value}`` map.  They are
+        written verbatim under ``gph2ccm.Field.<name>`` /
+        ``gph2ccm.Solver.<key>`` (plus ``gph2ccm.FieldNames`` /
+        ``gph2ccm.SolverKeys`` index lists) so downstream tooling can recover
+        the intended setup without gph2ccm ever solving anything.
+        """
+        if not (model.fields or model.solver_settings):
+            return
+        self._log("[gph2ccm] writing descriptive field/solver metadata ...")
+
+        field_names: list[str] = []
+        for f in model.fields:
+            if not isinstance(f, dict):
+                continue
+            name = f.get("name")
+            if not name:
+                continue
+            loc = f.get("location", "cell")
+            dtype = f.get("type", "scalar")
+            units = f.get("units", "")
+            field_names.append(str(name))
+            self.ccmio.write_optstr(
+                problem, f"gph2ccm.Field.{name}", f"{loc}|{dtype}|{units}"
+            )
+        if field_names:
+            self.ccmio.write_optstr(problem, "gph2ccm.FieldNames", ",".join(field_names))
+
+        solver_keys: list[str] = []
+        for k, v in model.solver_settings.items():
+            solver_keys.append(str(k))
+            self.ccmio.write_optstr(problem, f"gph2ccm.Solver.{k}", str(v))
+        if solver_keys:
+            self.ccmio.write_optstr(
+                problem, "gph2ccm.SolverKeys", ",".join(solver_keys)
+            )
+
     def write(self, model: CcmModel, ld: dict) -> None:
         ccmio = self.ccmio
         out = self.out_path
@@ -554,6 +596,13 @@ class CcmMeshWriter:
             for k, v in region.params.items():
                 self.ccmio.write_optstr(node, f"gph2ccm.BC.{k}", str(v))
 
+        # -- descriptive field / solver metadata (optional, data-driven) ------
+        # Carries the user's field/solver intent from the regions JSON into the
+        # .ccm as namespaced descriptive opt nodes.  This is reference metadata
+        # only -- gph2ccm never writes actual solution field data or turns
+        # itself into a solver-ready exporter (keep-boundary scope decision).
+        self._write_metadata_nodes(problem, model)
+
         ccmio.write_state(state, problem, "gph2ccm")
         ccmio.write_processor(processor, vertices_node, topology)
         ccmio.close_file(root)
@@ -644,14 +693,22 @@ def convert_model(
         mesh, regions, boundary_types, force_material,
         split_regions=split_regions,
         boundary_conditions=regions.get("boundary_conditions") if regions else None,
+        fields=regions.get("fields") if regions else None,
+        solver_settings=regions.get("solver_settings") if regions else None,
     )
     if verbose:
+        extra = ""
+        if model.fields or model.solver_settings:
+            extra = (
+                f", {len(model.fields)} field + "
+                f"{len(model.solver_settings)} solver metadata descriptors"
+            )
         print(
             f"[gph2ccm] model: {model.n_cells} cells, "
             f"{model.internal_face_ids.size} internal faces, "
             f"{sum(r.face_ids.size for r in model.boundary_regions)} boundary faces "
             f"in {len(model.boundary_regions)} regions, "
-            f"{len(model.cell_table)} cell types"
+            f"{len(model.cell_table)} cell types{extra}"
         )
         if model.default_face_ids.size:
             print(
