@@ -746,6 +746,60 @@ def test_dimension_note() -> None:
     print("test_dimension_note OK")
 
 
+def test_diagnose_quality_unit() -> None:
+    """diagnose_quality reports cheap metrics without touching the mesh."""
+    from gph2ccm.diagnose import diagnose_quality
+
+    mesh = make_synthetic_gph()
+    model = build_model(mesh, {"fluid_regions": ["fluid"]})
+    q = diagnose_quality(model, mesh["link_data"])
+
+    assert q["n_cells"] == 8
+    assert q["n_boundary_faces"] == 12
+    # 24 boundary faces total in the mesh; inlet(6)+outlet(6) claimed -> 12 default.
+    assert q["n_uncovered_boundary"] == 12
+    assert q["n_degenerate_boundary"] == 0
+    assert q["ok"] is False  # because 12 faces are uncovered
+    assert any("Default_Boundary_Region" in i for i in q["issues"])
+    # The mesh is not modified by diagnostics.
+    assert model.default_face_ids.size == 12
+    print("test_diagnose_quality_unit OK")
+
+
+def test_quality_note() -> None:
+    """The read-only quality summary is embedded as gph2ccm.Quality.* nodes."""
+    mesh = make_synthetic_gph()
+    model = build_model(mesh, {"fluid_regions": ["fluid"]})
+
+    ccmio = CCMIO()
+    with tempfile.TemporaryDirectory(prefix="gph2ccm_q_") as tmp:
+        out = Path(tmp) / "quality.ccm"
+        writer = CcmMeshWriter(ccmio, out, verbose=False)
+        writer.write(model, mesh["link_data"])
+        ccmio.compress(out)
+        verify_ccm(out, ccmio=ccmio, verbose=False)
+
+        root = ccmio.open_file_readonly(str(out))
+        try:
+            state, problem = ccmio.get_state(root)
+            assert (
+                ccmio.read_optstr(problem, "gph2ccm.Qual.Uncovered")
+                == "12"
+            )
+            assert (
+                ccmio.read_optstr(problem, "gph2ccm.Qual.Degenerate")
+                == "0"
+            )
+            # 12 uncovered -> summary flags issues.
+            assert ccmio.read_optstr(problem, "gph2ccm.Qual.Summary") == "issues"
+            assert "Default_Boundary_Region" in ccmio.read_optstr(
+                problem, "gph2ccm.Qual.Issues"
+            )
+        finally:
+            ccmio.close_file(root)
+    print("test_quality_note OK")
+
+
 if __name__ == "__main__":
     test_write_and_readback()
     test_model_build_parts_and_boundaries()
@@ -759,3 +813,5 @@ if __name__ == "__main__":
     test_periodic_pairing_metadata()
     test_processor_note()
     test_dimension_note()
+    test_diagnose_quality_unit()
+    test_quality_note()

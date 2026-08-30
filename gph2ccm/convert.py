@@ -23,6 +23,7 @@ from .ccmio import (
     K_CCMIO_VERTICES,
 )
 from .deps import import_gph2cgns
+from .diagnose import diagnose_quality
 from .model import (
     CcmModel,
     build_model,
@@ -527,6 +528,37 @@ class CcmMeshWriter:
         else:
             self.ccmio.write_optstr(problem, "gph2ccm.Note.TwoDWrapping", "n/a")
 
+    def _write_quality_note(self, problem, model: CcmModel, ld: dict) -> None:
+        """Embed a read-only quality summary as descriptive ``gph2ccm.Quality.*``
+        nodes (gph2ccm never modifies the mesh -- diagnostic only).
+
+        Surfaces the two issues that are cheap to detect at export time: boundary
+        faces left in ``Default_Boundary_Region`` (uncovered) and degenerate
+        boundary faces (``npe < 3``).  Heavier checks (duplicate faces, cell
+        closure) remain in ``tools/topo_check.py``.
+        """
+        q = diagnose_quality(model, ld)
+        # Node names are capped at K_CCMIO_MAX_STRING_LENGTH (32); use the
+        # short "gph2ccm.Qual." prefix so every key fits.
+        self.ccmio.write_optstr(
+            problem, "gph2ccm.Qual.Summary", "ok" if q["ok"] else "issues"
+        )
+        self.ccmio.write_optstr(
+            problem,
+            "gph2ccm.Qual.Uncovered",
+            str(q["n_uncovered_boundary"]),
+        )
+        self.ccmio.write_optstr(
+            problem,
+            "gph2ccm.Qual.Degenerate",
+            str(q["n_degenerate_boundary"]),
+        )
+        if q["issues"]:
+            self.ccmio.write_optstr(
+                problem, "gph2ccm.Qual.Issues", " | ".join(q["issues"])
+            )
+            self._log("[gph2ccm] quality notes: " + " | ".join(q["issues"]))
+
     def write(self, model: CcmModel, ld: dict) -> None:
         ccmio = self.ccmio
         out = self.out_path
@@ -710,6 +742,7 @@ class CcmMeshWriter:
         # -- capability / limitation notes (informational) --------------------
         self._write_processor_note(problem, model)
         self._write_dimension_note(problem, model)
+        self._write_quality_note(problem, model, ld)
 
         ccmio.write_state(state, problem, "gph2ccm")
         ccmio.write_processor(processor, vertices_node, topology)

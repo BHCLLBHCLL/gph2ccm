@@ -55,11 +55,11 @@
 | 17 | Periodic / Cyclic 配对 | ⚠️ | 不生成几何配对界面；可经 `regions["periodic"]` 写入 `gph2ccm.Periodic.*` **描述性**配对声明 |
 | 18 | 2D 网格包裹 | ❌ | 不挤出壳层；新增 2D 检测 + `gph2ccm.Note.Dimension`/`TwoDWrapping` 自说明（包裹不在范围内） |
 | 19 | 单元 / 节点场数据 | ❌ | 无 |
-| 20 | 网格质量修复 | ❌ | 仅 `topo_check.py` 诊断，不修复 |
+| 20 | 网格质量修复 | ⚠️ | 仍不修改网格；新增导出期内嵌 `gph2ccm.Qual.*` 摘要（未覆盖/退化面计数）+ `diagnose_quality` API；重检查仍在 `tools/topo_check.py` |
 | 21 | 高阶单元（2 阶） | ❌ | legacy CCM 一般不支持，未做适配 |
 
-**完整度统计**：21 项中已实现 12、部分 6、缺失 3 → **核心网格层完整覆盖，
-物理 / 求解层进入「描述性元数据」阶段（可携带信息但非求解就绪）**。
+**完整度统计**：21 项中已实现 12、部分 7、缺失 2（#12 多处理器、#21 高阶单元仍为 ❌）→
+**核心网格层完整覆盖，物理 / 求解层进入「描述性元数据 + 诊断」阶段（可携带/校验信息但非求解就绪）**。
 
 ---
 
@@ -122,7 +122,7 @@ Configuration=IN_PLACE / ConditionType=InternalInterface）、两侧带单元数
 
 ## 5. 关键缺口（按影响排序）
 
-> 执行进度（对应原始 8 项清单）：#8 测试 ✅、#2 边界条件结构化 ✅、#1 结果场/求解设置 ⚠️（描述性元数据载体）、#3 MRF ⚠️（描述性声明）、#4 周期/滑移配对 ⚠️（描述性声明）、#5 多 processor ⚠️（限制自说明）、#6 2D 包裹 ⚠️（检测+自说明）、#7 待执行。
+> 执行进度（对应原始 8 项清单）：**#8 测试 ✅、#2 边界条件结构化 ✅、#1 结果场/求解设置 ⚠️、#3 MRF ⚠️、#4 周期/滑移配对 ⚠️、#5 多 processor ⚠️、#6 2D 包裹 ⚠️、#7 质量诊断 ⚠️ —— 全部完成（物理/求解层均为描述性/诊断性，非求解就绪）**。
 
 1. **无结果场 / 求解设置** —— ⚠️ 已有描述性载体：经 `regions["fields"]` / `regions["solver_settings"]` 写入 `gph2ccm.Field.*` / `gph2ccm.Solver.*` 命名空间节点；**非实际场数据、不求解**（"keep boundary" 范围）。
 2. **边界条件仅类型名** —— ⚠️ 已结构化：`boundary_conditions` 经 `_normalize_bctype` 规范化类型 + `gph2ccm.BC.*` 描述性参数（regions JSON 驱动），仍非求解就绪。
@@ -130,7 +130,7 @@ Configuration=IN_PLACE / ConditionType=InternalInterface）、两侧带单元数
 4. **周期 / 滑移界面配对** —— ⚠️ 已有描述性配对声明：经 `regions["periodic"]` 写入 `gph2ccm.Periodic.*`（region/shadow/type/axis/angle），**未生成几何配对界面**。
 5. **多 processor / 分布式** —— ⚠️ 已自说明：legacy CCM 单 processor 固有限制，写入 `gph2ccm.Note.Processors`/`MultiProcessor` 元数据 + 大网格（>200 万 cell）告警；**无分布式分区写入**。
 6. **2D 网格包裹** —— ⚠️ 已检测并自说明：识别 collapsed-axis 的 2D 网格，写入 `gph2ccm.Note.Dimension`/`TwoDWrapping` 元数据；**不挤出壳层**（超出 keep-boundary 范围）。
-7. **网格质量修复** —— 仅诊断，不修退化面 / 悬挂节点（待 #7）。
+7. **网格质量修复** —— ⚠️ 已内嵌导出期质量摘要（`gph2ccm.Qual.*`：未覆盖/退化面计数）+ `diagnose_quality` API；**仍不修改网格**（keep-boundary 范围；重检查见 `tools/topo_check.py`）。
 8. **测试与 CI 薄弱** —— ✅ 已补 `tests/test_writer.py` 10 个回归用例（写回读验证、split/interface、verify 放宽、结构化 BC、字段/求解/MRF/周期元数据）。
 
 ---
