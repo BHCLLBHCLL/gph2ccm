@@ -674,6 +674,33 @@ def test_periodic_pairing_metadata() -> None:
     print("test_periodic_pairing_metadata OK")
 
 
+def test_processor_note() -> None:
+    """The legacy-CCM single-processor limitation is recorded as metadata."""
+    mesh = make_synthetic_gph()
+    model = build_model(mesh, {"fluid_regions": ["fluid"]})
+
+    ccmio = CCMIO()
+    with tempfile.TemporaryDirectory(prefix="gph2ccm_proc_") as tmp:
+        out = Path(tmp) / "proc.ccm"
+        writer = CcmMeshWriter(ccmio, out, verbose=False)
+        writer.write(model, mesh["link_data"])
+        ccmio.compress(out)
+        verify_ccm(out, ccmio=ccmio, verbose=False)
+
+        root = ccmio.open_file_readonly(str(out))
+        try:
+            state, problem = ccmio.get_state(root)
+            # Single processor, multi-processor unsupported -- self-documenting.
+            assert ccmio.read_optstr(problem, "gph2ccm.Note.Processors") == "1"
+            assert (
+                ccmio.read_optstr(problem, "gph2ccm.Note.MultiProcessor")
+                == "unsupported"
+            )
+        finally:
+            ccmio.close_file(root)
+    print("test_processor_note OK")
+
+
 if __name__ == "__main__":
     test_write_and_readback()
     test_model_build_parts_and_boundaries()
@@ -685,3 +712,4 @@ if __name__ == "__main__":
     test_fields_and_solver_metadata()
     test_mrf_metadata()
     test_periodic_pairing_metadata()
+    test_processor_note()

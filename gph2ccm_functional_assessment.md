@@ -47,7 +47,7 @@
 | 9 | CCMIOCompress | ✅ | 写出后压缩 |
 | 10 | Reorder（RCM 单元重排） | ✅ | 可选，降低导入重排开销 |
 | 11 | Verify 读回校验 | ✅ | H1 已修复：split 模式 interface 两侧共享面不再误报（relaxed 校验） |
-| 12 | Multiple Processors（分布式） | ❌ | 单 processor |
+| 12 | Multiple Processors（分布式） | ❌ | 单 processor（legacy CCM 固有限制）；已写入 `gph2ccm.Note.Processors`/`MultiProcessor` 自说明元数据 + 大网格告警 |
 | 13 | Solution Fields（结果场） | ⚠️ | 不写实际场数据；可经 `regions["fields"]` 写入 `gph2ccm.Field.*` **描述性**场定义 |
 | 14 | Boundary Conditions（含对称 / 周期配对） | ⚠️ | 结构化类型规范化 + `gph2ccm.BC.*` 描述性参数（`regions` JSON 驱动），仍非求解就绪 |
 | 15 | Material / Region 求解属性 | ⚠️ | 新增 `gph2ccm.Solver.*` 描述性求解设置元数据（`regions` JSON 驱动），仍非实际属性 |
@@ -122,13 +122,13 @@ Configuration=IN_PLACE / ConditionType=InternalInterface）、两侧带单元数
 
 ## 5. 关键缺口（按影响排序）
 
-> 执行进度（对应原始 8 项清单）：#8 测试 ✅、#2 边界条件结构化 ✅、#1 结果场/求解设置 ⚠️（描述性元数据载体）、#3 MRF ⚠️（描述性声明）、#4 周期/滑移配对 ⚠️（描述性声明）、#5–#7 待执行。
+> 执行进度（对应原始 8 项清单）：#8 测试 ✅、#2 边界条件结构化 ✅、#1 结果场/求解设置 ⚠️（描述性元数据载体）、#3 MRF ⚠️（描述性声明）、#4 周期/滑移配对 ⚠️（描述性声明）、#5 多 processor ⚠️（限制自说明）、#6–#7 待执行。
 
 1. **无结果场 / 求解设置** —— ⚠️ 已有描述性载体：经 `regions["fields"]` / `regions["solver_settings"]` 写入 `gph2ccm.Field.*` / `gph2ccm.Solver.*` 命名空间节点；**非实际场数据、不求解**（"keep boundary" 范围）。
 2. **边界条件仅类型名** —— ⚠️ 已结构化：`boundary_conditions` 经 `_normalize_bctype` 规范化类型 + `gph2ccm.BC.*` 描述性参数（regions JSON 驱动），仍非求解就绪。
 3. **MRF 仅 region 划分** —— ⚠️ 已有描述性旋转参考系声明：经 `regions["mrf"]` 写入 `gph2ccm.MRF.*`（region/type/axis/origin/omega/units），**非真实旋转条件**。
 4. **周期 / 滑移界面配对** —— ⚠️ 已有描述性配对声明：经 `regions["periodic"]` 写入 `gph2ccm.Periodic.*`（region/shadow/type/axis/angle），**未生成几何配对界面**。
-5. **多 processor / 分布式** —— 不支持大网格并行分区写入（待 #5）。
+5. **多 processor / 分布式** —— ⚠️ 已自说明：legacy CCM 单 processor 固有限制，写入 `gph2ccm.Note.Processors`/`MultiProcessor` 元数据 + 大网格（>200 万 cell）告警；**无分布式分区写入**。
 6. **2D 网格包裹** —— 不支持 2D 算例（待 #6）。
 7. **网格质量修复** —— 仅诊断，不修退化面 / 悬挂节点（待 #7）。
 8. **测试与 CI 薄弱** —— ✅ 已补 `tests/test_writer.py` 10 个回归用例（写回读验证、split/interface、verify 放宽、结构化 BC、字段/求解/MRF/周期元数据）。

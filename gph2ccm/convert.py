@@ -472,6 +472,29 @@ class CcmMeshWriter:
                 problem, "gph2ccm.PeriodicNames", ",".join(per_names)
             )
 
+    def _write_processor_note(self, problem, model: CcmModel) -> None:
+        """Record the legacy-CCM single-processor limitation as descriptive
+        metadata and warn when a partitioned write would normally be expected.
+
+        The legacy ``.ccm`` format written by libccmio is single-processor:
+        there is exactly one ``K_CCMIO_PROCESSOR`` entity per file, so gph2ccm
+        cannot emit the distributed / multi-partition layout that very large
+        meshes (or STAR-CCM+ parallel runs) would use.  We carry that fact in
+        the file so the limitation is self-documenting rather than silent.
+        """
+        self.ccmio.write_optstr(problem, "gph2ccm.Note.Processors", "1")
+        self.ccmio.write_optstr(
+            problem, "gph2ccm.Note.MultiProcessor", "unsupported"
+        )
+        # Heuristic threshold beyond which a partitioned write is usually wanted.
+        if model.n_cells > 2_000_000:
+            self._log(
+                "[gph2ccm] note: legacy CCM is single-processor; this mesh "
+                f"({model.n_cells} cells) is written as one processor. Very "
+                "large meshes may hit format/tooling limits -- consider "
+                "splitting upstream or importing in chunks."
+            )
+
     def write(self, model: CcmModel, ld: dict) -> None:
         ccmio = self.ccmio
         out = self.out_path
@@ -651,6 +674,9 @@ class CcmMeshWriter:
         # only -- gph2ccm never writes actual solution field data or turns
         # itself into a solver-ready exporter (keep-boundary scope decision).
         self._write_metadata_nodes(problem, model)
+
+        # -- capability / limitation notes (informational) --------------------
+        self._write_processor_note(problem, model)
 
         ccmio.write_state(state, problem, "gph2ccm")
         ccmio.write_processor(processor, vertices_node, topology)
