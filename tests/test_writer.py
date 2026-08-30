@@ -701,6 +701,51 @@ def test_processor_note() -> None:
     print("test_processor_note OK")
 
 
+def test_dimension_note() -> None:
+    """2D (collapsed-axis) meshes are detected and wrapping limitation noted."""
+    mesh = make_synthetic_gph()
+    model = build_model(mesh, {"fluid_regions": ["fluid"]})
+
+    # Flatten the z-axis so the mesh becomes effectively 2D.
+    model.vertices = model.vertices.copy()
+    model.vertices[:, 2] = 0.0
+
+    ccmio = CCMIO()
+    with tempfile.TemporaryDirectory(prefix="gph2ccm_2d_") as tmp:
+        out = Path(tmp) / "dim2d.ccm"
+        writer = CcmMeshWriter(ccmio, out, verbose=False)
+        writer.write(model, mesh["link_data"])
+        ccmio.compress(out)
+        verify_ccm(out, ccmio=ccmio, verbose=False)
+
+        root = ccmio.open_file_readonly(str(out))
+        try:
+            state, problem = ccmio.get_state(root)
+            assert ccmio.read_optstr(problem, "gph2ccm.Note.Dimension") == "2D"
+            assert (
+                ccmio.read_optstr(problem, "gph2ccm.Note.TwoDWrapping")
+                == "unsupported"
+            )
+        finally:
+            ccmio.close_file(root)
+
+    # The default (non-flattened) synthetic mesh is 3D -> wrapping is n/a.
+    model3d = build_model(mesh, {"fluid_regions": ["fluid"]})
+    with tempfile.TemporaryDirectory(prefix="gph2ccm_3d_") as tmp:
+        out = Path(tmp) / "dim3d.ccm"
+        writer = CcmMeshWriter(ccmio, out, verbose=False)
+        writer.write(model3d, mesh["link_data"])
+        ccmio.compress(out)
+        root = ccmio.open_file_readonly(str(out))
+        try:
+            state, problem = ccmio.get_state(root)
+            assert ccmio.read_optstr(problem, "gph2ccm.Note.Dimension") == "3D"
+            assert ccmio.read_optstr(problem, "gph2ccm.Note.TwoDWrapping") == "n/a"
+        finally:
+            ccmio.close_file(root)
+    print("test_dimension_note OK")
+
+
 if __name__ == "__main__":
     test_write_and_readback()
     test_model_build_parts_and_boundaries()
@@ -713,3 +758,4 @@ if __name__ == "__main__":
     test_mrf_metadata()
     test_periodic_pairing_metadata()
     test_processor_note()
+    test_dimension_note()

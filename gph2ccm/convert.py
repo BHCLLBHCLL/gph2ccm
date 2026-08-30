@@ -495,6 +495,38 @@ class CcmMeshWriter:
                 "splitting upstream or importing in chunks."
             )
 
+    def _write_dimension_note(self, problem, model: CcmModel) -> None:
+        """Detect a 2D (collapsed-axis) mesh and record that legacy-CCM 2D
+        wrapping is not performed.
+
+        gph2ccm never extrudes a shell layer to make a 2D Cradle mesh valid in
+        STAR-CCM+'s 2D mode (out of the "keep boundary" scope -- it would be
+        modifying the mesh, not merely describing it).  We detect a collapsed
+        axis and carry the fact plus the limitation in the file so the user is
+        not surprised at import time.
+        """
+        verts = np.asarray(model.vertices, dtype=np.float64)
+        if verts.shape[0] == 0:
+            return
+        ext = verts.max(axis=0) - verts.min(axis=0)
+        scale = float(np.max(ext)) if ext.size else 0.0
+        eps = max(scale, 1e-9) * 1e-6
+        n_active = int(np.count_nonzero(ext > eps))
+        # A genuinely 3D mesh has 3 active axes; a 2D mesh has exactly 2.
+        ndim = 3 if n_active >= 3 else 2
+        self.ccmio.write_optstr(problem, "gph2ccm.Note.Dimension", f"{ndim}D")
+        if ndim < 3:
+            self.ccmio.write_optstr(
+                problem, "gph2ccm.Note.TwoDWrapping", "unsupported"
+            )
+            self._log(
+                "[gph2ccm] note: mesh appears 2D (a collapsed axis); legacy "
+                "CCM 2D wrapping (shell-layer extrusion) is NOT performed. "
+                "Import as 2D in STAR-CCM+ manually if required."
+            )
+        else:
+            self.ccmio.write_optstr(problem, "gph2ccm.Note.TwoDWrapping", "n/a")
+
     def write(self, model: CcmModel, ld: dict) -> None:
         ccmio = self.ccmio
         out = self.out_path
@@ -677,6 +709,7 @@ class CcmMeshWriter:
 
         # -- capability / limitation notes (informational) --------------------
         self._write_processor_note(problem, model)
+        self._write_dimension_note(problem, model)
 
         ccmio.write_state(state, problem, "gph2ccm")
         ccmio.write_processor(processor, vertices_node, topology)
