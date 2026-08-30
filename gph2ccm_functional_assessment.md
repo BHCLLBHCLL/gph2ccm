@@ -99,7 +99,7 @@
 | 架构分层 | ✅ 清晰：deps（解析）/ model（模型）/ ccmio（绑定）/ convert（编排）/ verify / reorder；复用 `gphdecoding` 与 `ccmio.dll`，不自造轮子 |
 | 文档 | ✅ 四件套（README / AGENTS / DEV_SUMMARY / 问题清单）齐全且**基本与代码一致**（split 已实现，文档未超前） |
 | 工具链 | ✅ 完整：dump / topo_check / make_demo / make_two_region / extract_subset / ImportCcmCheck.java + 4 份真实样本 dump |
-| 测试 | ⚠️ 仅 2 个用例，缺 split / interface / verify 路径；无 CI |
+| 测试 | ✅ 14 个用例（含 split / interface / verify / 元数据 / 诊断），缺 ccmio 时自动 skip；CI 已接入（GitHub Actions，Ubuntu/Windows × 3.11/3.12） |
 | 错误恢复 | ⚠️ 无 finally、无备份回滚之外的容错 |
 | 可维护性 | ⚠️ 存在若干代码质量问题（M1 / M4 / H1 / H2 / L 系列，见问题清单） |
 
@@ -131,7 +131,7 @@ Configuration=IN_PLACE / ConditionType=InternalInterface）、两侧带单元数
 5. **多 processor / 分布式** —— ⚠️ 已自说明：legacy CCM 单 processor 固有限制，写入 `gph2ccm.Note.Processors`/`MultiProcessor` 元数据 + 大网格（>200 万 cell）告警；**无分布式分区写入**。
 6. **2D 网格包裹** —— ⚠️ 已检测并自说明：识别 collapsed-axis 的 2D 网格，写入 `gph2ccm.Note.Dimension`/`TwoDWrapping` 元数据；**不挤出壳层**（超出 keep-boundary 范围）。
 7. **网格质量修复** —— ⚠️ 已内嵌导出期质量摘要（`gph2ccm.Qual.*`：未覆盖/退化面计数）+ `diagnose_quality` API；**仍不修改网格**（keep-boundary 范围；重检查见 `tools/topo_check.py`）。
-8. **测试与 CI 薄弱** —— ✅ 已补 `tests/test_writer.py` 10 个回归用例（写回读验证、split/interface、verify 放宽、结构化 BC、字段/求解/MRF/周期元数据）。
+8. **测试与 CI 薄弱** —— ✅ 已补 `tests/test_writer.py` **14 个**回归用例（写回读验证、split/interface、verify 放宽、结构化 BC、字段/求解/MRF/周期元数据、processor/dimension note、质量诊断）；✅ CI 已接入 `.github/workflows/tests.yml`（Ubuntu/Windows × Python 3.11/3.12），托管 runner 无 ccmio 时跳过写入/读回用例而非失败，self-hosted runner 配 `GPH2CCM_CCMIO_DLL` secret 可跑全量。
 
 ---
 
@@ -141,6 +141,7 @@ Configuration=IN_PLACE / ConditionType=InternalInterface）、两侧带单元数
 - **中期（扩广度）**：结果场/MRF/周期 **描述性元数据载体已落地**（数据驱动、纯描述）；
   真正的求解属性写入（待上游 GPH 提供实际数据）、多 processor 分块写入
   （需先解决 2D 分块 bug 的 vertex 路径）。
-- **长期（工程化）**：CI 接入 `test_writer.py` + 至少 1 个合成多 region 网格；
-  在 README 明确「导入后须在 STAR-CCM+ 侧补充」的清单（材料 / 边界条件 / 场）；
+- **长期（工程化）**：✅ CI 已接入 `test_writer.py`（合成多 region 网格用例已在
+  `test_split_regions_*` 中覆盖）；✅ README 已新增「描述性元数据（`gph2ccm.*` 节点）」
+  与「导入后须在 STAR-CCM+ 侧补充的清单」两节；
   建立 `gphdecoding` 解析层与 `ccmio.dll` 行为的版本对照表。

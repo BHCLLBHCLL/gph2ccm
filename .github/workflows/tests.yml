@@ -1,0 +1,43 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: pytest (${{ matrix.os }}, py${{ matrix.python-version }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python-version: ["3.11", "3.12"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+          python -m pip install pytest
+
+      - name: Import sanity check
+        run: |
+          python -c "import gph2ccm.convert, gph2ccm.model, gph2ccm.ccmio, gph2ccm.verify, gph2ccm.diagnose; print('imports OK')"
+
+      - name: Run tests
+        # The CCMIO shared library ships with STAR-CCM+ / libccmio, so on a
+        # hosted runner the write/read tests are SKIPPED rather than failed.
+        # Set GPH2CCM_CCMIO_DLL (e.g. on a self-hosted runner with STAR-CCM+)
+        # to exercise the full suite.
+        env:
+          GPH2CCM_CCMIO_DLL: ${{ secrets.GPH2CCM_CCMIO_DLL }}
+        run: python -m pytest tests/test_writer.py -v

@@ -10,9 +10,12 @@ Run directly:  ``python tests/test_writer.py``
 
 from __future__ import annotations
 
+import os
 import sys
 import tempfile
+import traceback
 from pathlib import Path
+from typing import Optional
 
 import numpy as np
 
@@ -31,6 +34,57 @@ from gph2ccm.ccmio import (  # noqa: E402
 from gph2ccm.convert import CcmMeshWriter  # noqa: E402
 from gph2ccm.model import build_model  # noqa: E402
 from gph2ccm.verify import verify_ccm  # noqa: E402
+
+
+class Skipped(Exception):
+    """Raised when a test cannot run (handled by the plain-python runner)."""
+
+
+def _running_under_pytest() -> bool:
+    """True only when pytest is *actually* executing these tests.
+
+    ``import pytest`` merely succeeding is not enough: the plain
+    ``python tests/test_writer.py`` runner also runs in environments where
+    pytest happens to be installed, and calling ``pytest.skip()`` there raises
+    ``_pytest.outcomes.Skipped`` -- which the plain runner does not recognise,
+    turning a would-be skip into a failure with exit code 1.
+    """
+    if "pytest" not in sys.modules:
+        return False
+    return os.environ.get("PYTEST_CURRENT_TEST") is not None
+
+
+def _skip(exc: BaseException) -> "Exception":
+    """Return the skip exception appropriate for the current runner."""
+    if _running_under_pytest():
+        import pytest
+
+        pytest.skip(f"CCMIO library not available ({exc})")
+    return Skipped(f"CCMIO library not available ({exc})")
+
+
+_CCMIO: Optional["CCMIO"] = None
+
+
+def _require_ccmio() -> "CCMIO":
+    """Return a CCMIO instance, *skipping* the test when the library is absent.
+
+    The CCMIO shared library only exists where STAR-CCM+ / libccmio is
+    installed, so a CI runner without it must skip -- not fail -- the
+    write/read tests.  Under pytest this raises ``pytest.skip``; under the
+    plain ``python tests/test_writer.py`` runner it raises :class:`Skipped`,
+    which ``main()`` reports and counts as skipped.
+
+    The instance is cached: loading ccmio.dll once is enough for the session.
+    """
+    global _CCMIO
+    if _CCMIO is not None:
+        return _CCMIO
+    try:
+        _CCMIO = CCMIO()
+    except FileNotFoundError as exc:
+        raise _skip(exc) from exc
+    return _CCMIO
 
 
 # -- synthetic GPH data (ported from writeexample.cpp) -----------------------
@@ -188,7 +242,7 @@ def test_write_and_readback() -> None:
     assert model.default_face_ids.size == 12
     assert model.cell_table[0].material == "fluid"
 
-    ccmio = CCMIO()
+    ccmio = _require_ccmio()
     with tempfile.TemporaryDirectory(prefix="gph2ccm_test_") as tmp:
         out = Path(tmp) / "box.ccm"
         writer = CcmMeshWriter(ccmio, out, verbose=False)
@@ -415,7 +469,7 @@ def test_interface_definitions_written() -> None:
     mesh = make_split_gph()
     model = build_model(mesh, SPLIT_REGIONS, split_regions=True)
 
-    ccmio = CCMIO()
+    ccmio = _require_ccmio()
     with tempfile.TemporaryDirectory(prefix="gph2ccm_split_") as tmp:
         out = Path(tmp) / "split.ccm"
         writer = CcmMeshWriter(ccmio, out, verbose=False, split_regions=True)
@@ -439,7 +493,7 @@ def test_split_regions_write_and_readback() -> None:
     mesh = make_split_gph()
     model = build_model(mesh, SPLIT_REGIONS, split_regions=True)
 
-    ccmio = CCMIO()
+    ccmio = _require_ccmio()
     with tempfile.TemporaryDirectory(prefix="gph2ccm_split_") as tmp:
         out = Path(tmp) / "split.ccm"
         writer = CcmMeshWriter(ccmio, out, verbose=False, split_regions=True)
@@ -481,7 +535,7 @@ def test_verify_split_no_false_positive() -> None:
     """verify_ccm must not flag duplicated interface face ids as an error."""
     mesh = make_split_gph()
     model = build_model(mesh, SPLIT_REGIONS, split_regions=True)
-    ccmio = CCMIO()
+    ccmio = _require_ccmio()
     with tempfile.TemporaryDirectory(prefix="gph2ccm_split_") as tmp:
         out = Path(tmp) / "split.ccm"
         writer = CcmMeshWriter(ccmio, out, verbose=False, split_regions=True)
@@ -521,7 +575,7 @@ def test_structured_boundary_conditions() -> None:
     assert inlet.params == {"velocity": [1.0, 0.0, 0.0], "temperature": 300}
 
     # Written to the CCM as descriptive, namespaced opt nodes.
-    ccmio = CCMIO()
+    ccmio = _require_ccmio()
     with tempfile.TemporaryDirectory(prefix="gph2ccm_bc_") as tmp:
         out = Path(tmp) / "bc.ccm"
         writer = CcmMeshWriter(ccmio, out, verbose=False)
@@ -566,7 +620,7 @@ def test_fields_and_solver_metadata() -> None:
     assert model.solver_settings.get("turbulence_model") == "k-epsilon"
     assert model.solver_settings.get("steady") is True
 
-    ccmio = CCMIO()
+    ccmio = _require_ccmio()
     with tempfile.TemporaryDirectory(prefix="gph2ccm_fields_") as tmp:
         out = Path(tmp) / "fields.ccm"
         writer = CcmMeshWriter(ccmio, out, verbose=False)
@@ -615,7 +669,7 @@ def test_mrf_metadata() -> None:
     model = build_model(mesh, regions)
     assert len(model.mrf) == 1
 
-    ccmio = CCMIO()
+    ccmio = _require_ccmio()
     with tempfile.TemporaryDirectory(prefix="gph2ccm_mrf_") as tmp:
         out = Path(tmp) / "mrf.ccm"
         writer = CcmMeshWriter(ccmio, out, verbose=False)
@@ -654,7 +708,7 @@ def test_periodic_pairing_metadata() -> None:
     model = build_model(mesh, regions)
     assert len(model.periodic) == 1
 
-    ccmio = CCMIO()
+    ccmio = _require_ccmio()
     with tempfile.TemporaryDirectory(prefix="gph2ccm_per_") as tmp:
         out = Path(tmp) / "periodic.ccm"
         writer = CcmMeshWriter(ccmio, out, verbose=False)
@@ -679,7 +733,7 @@ def test_processor_note() -> None:
     mesh = make_synthetic_gph()
     model = build_model(mesh, {"fluid_regions": ["fluid"]})
 
-    ccmio = CCMIO()
+    ccmio = _require_ccmio()
     with tempfile.TemporaryDirectory(prefix="gph2ccm_proc_") as tmp:
         out = Path(tmp) / "proc.ccm"
         writer = CcmMeshWriter(ccmio, out, verbose=False)
@@ -710,7 +764,7 @@ def test_dimension_note() -> None:
     model.vertices = model.vertices.copy()
     model.vertices[:, 2] = 0.0
 
-    ccmio = CCMIO()
+    ccmio = _require_ccmio()
     with tempfile.TemporaryDirectory(prefix="gph2ccm_2d_") as tmp:
         out = Path(tmp) / "dim2d.ccm"
         writer = CcmMeshWriter(ccmio, out, verbose=False)
@@ -771,7 +825,7 @@ def test_quality_note() -> None:
     mesh = make_synthetic_gph()
     model = build_model(mesh, {"fluid_regions": ["fluid"]})
 
-    ccmio = CCMIO()
+    ccmio = _require_ccmio()
     with tempfile.TemporaryDirectory(prefix="gph2ccm_q_") as tmp:
         out = Path(tmp) / "quality.ccm"
         writer = CcmMeshWriter(ccmio, out, verbose=False)
@@ -800,18 +854,59 @@ def test_quality_note() -> None:
     print("test_quality_note OK")
 
 
+TESTS = [
+    test_write_and_readback,
+    test_model_build_parts_and_boundaries,
+    test_split_regions_builds_interface_faces,
+    test_interface_definitions_written,
+    test_split_regions_write_and_readback,
+    test_verify_split_no_false_positive,
+    test_structured_boundary_conditions,
+    test_fields_and_solver_metadata,
+    test_mrf_metadata,
+    test_periodic_pairing_metadata,
+    test_processor_note,
+    test_dimension_note,
+    test_diagnose_quality_unit,
+    test_quality_note,
+]
+
+
+def main() -> int:
+    """Run every test; return 0 on success, 1 on failure.
+
+    Tests needing the CCMIO library are *skipped* (not failed) when
+    ccmio.dll / libccmio is unavailable, so this is safe to run on machines
+    without STAR-CCM+ (e.g. CI runners) -- use pytest for the richer report.
+    """
+    # Belt and braces: if a test somehow reaches pytest's own skip mechanism
+    # (e.g. imported by another plugin), still treat it as a skip, not a fail.
+    skip_types: tuple[type[BaseException], ...] = (Skipped,)
+    if _running_under_pytest():
+        import pytest
+
+        skip_types = (Skipped, pytest.skip.Exception)
+
+    passed: list[str] = []
+    skipped: list[str] = []
+    failed: list[str] = []
+    for fn in TESTS:
+        try:
+            fn()
+        except skip_types as exc:
+            skipped.append(fn.__name__)
+            print(f"{fn.__name__} SKIPPED: {exc}")
+        except Exception:  # noqa: BLE001 - report and keep going
+            failed.append(fn.__name__)
+            print(f"{fn.__name__} FAILED")
+            traceback.print_exc()
+        else:
+            passed.append(fn.__name__)
+    print(
+        f"\n{len(passed)} passed, {len(failed)} failed, {len(skipped)} skipped"
+    )
+    return 1 if failed else 0
+
+
 if __name__ == "__main__":
-    test_write_and_readback()
-    test_model_build_parts_and_boundaries()
-    test_split_regions_builds_interface_faces()
-    test_interface_definitions_written()
-    test_split_regions_write_and_readback()
-    test_verify_split_no_false_positive()
-    test_structured_boundary_conditions()
-    test_fields_and_solver_metadata()
-    test_mrf_metadata()
-    test_periodic_pairing_metadata()
-    test_processor_note()
-    test_dimension_note()
-    test_diagnose_quality_unit()
-    test_quality_note()
+    raise SystemExit(main())
