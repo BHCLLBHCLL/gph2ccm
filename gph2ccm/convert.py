@@ -687,7 +687,9 @@ def convert_model(
 
         if verbose:
             print("[gph2ccm] verifying output ...")
-        verify_ccm(out_path, ccmio=ccmio, verbose=verbose)
+        verify_ccm(
+            out_path, ccmio=ccmio, verbose=verbose, split_regions=split_regions
+        )
 
     if verbose:
         size_mb = out_path.stat().st_size / 1e6

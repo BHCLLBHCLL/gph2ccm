@@ -43,10 +43,21 @@ def _parse_stream(stream: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarra
     return npe_arr, vids, starts_arr
 
 
-def verify_ccm(path: str | Path, ccmio: Optional[CCMIO] = None, verbose: bool = True) -> dict:
+def verify_ccm(
+    path: str | Path,
+    ccmio: Optional[CCMIO] = None,
+    verbose: bool = True,
+    split_regions: bool = False,
+) -> dict:
     """Open *path*, read all mesh entities and check consistency.
 
     Returns a summary dict; raises ``AssertionError`` on any inconsistency.
+
+    ``split_regions`` mirrors the writer flag: when enabled, per-side
+    interface boundary patches intentionally reuse the same face ids (the two
+    sides of a grid interface), so the cross-region uniqueness check is
+    relaxed (STAR-CCM+ pairs interface faces by boundary-region id + index,
+    not by face id -- see the reference ``bladerotating_dm2.ccm``).
     """
     ccmio = ccmio or CCMIO()
     path = Path(path)
@@ -127,13 +138,17 @@ def verify_ccm(path: str | Path, ccmio: Optional[CCMIO] = None, verbose: bool = 
                 "map_ids": map_ids,
             }
 
-        # boundary face ids must be unique across regions
+        # boundary face ids must be unique across regions -- except in
+        # split_regions mode, where the two per-side interface patches of a
+        # grid interface intentionally share the same face ids (STAR-CCM+
+        # pairs them by boundary-region id + index order, not by face id).
         all_ids = np.concatenate(
             [b["map_ids"] for b in boundary.values()]
         ) if boundary else np.empty(0, np.int64)
-        assert all_ids.size == np.unique(all_ids).size, (
-            "duplicate boundary face ids across regions"
-        )
+        if not split_regions:
+            assert all_ids.size == np.unique(all_ids).size, (
+                "duplicate boundary face ids across regions"
+            )
         n_bf_total = int(all_ids.size)
 
         # cell types discovered from problem description
