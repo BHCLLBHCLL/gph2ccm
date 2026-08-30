@@ -548,6 +548,11 @@ class CcmMeshWriter:
             )
             ccmio.write_optstr(node, "Label", region.label[:32])
             ccmio.write_optstr(node, "BoundaryType", region.btype)
+            # Optional, user-supplied structured-BC metadata (descriptive
+            # only -- gph2ccm never auto-applies a solver condition).  Namespaced
+            # under "gph2ccm.BC." so it cannot collide with native CCM keys.
+            for k, v in region.params.items():
+                self.ccmio.write_optstr(node, f"gph2ccm.BC.{k}", str(v))
 
         ccmio.write_state(state, problem, "gph2ccm")
         ccmio.write_processor(processor, vertices_node, topology)
@@ -638,6 +643,7 @@ def convert_model(
     model = build_model(
         mesh, regions, boundary_types, force_material,
         split_regions=split_regions,
+        boundary_conditions=regions.get("boundary_conditions") if regions else None,
     )
     if verbose:
         print(

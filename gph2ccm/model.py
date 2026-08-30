@@ -22,6 +22,9 @@ class BoundaryRegion:
     label: str
     btype: str
     face_ids: np.ndarray  # global 0-based GPH face ids
+    params: dict = field(default_factory=dict)  # optional structured BC metadata
+    # (user-supplied, descriptive only -- never auto-applied as a solver setup;
+    #  see the "keep boundary" scope decision for gph2ccm).
 
 
 @dataclass
@@ -95,6 +98,55 @@ def guess_boundary_type(name: str) -> str:
     return "wall"
 
 
+# Valid legacy CCM BoundaryType tokens (STAR-CD / STAR-CCM+).  Anything the
+# user supplies that is not in this set is treated as a free-form hint and
+# mapped to the closest valid token.
+_CCM_BOUNDARY_TYPES = {
+    "wall", "inlet", "outlet", "pressure", "symmetry", "periodic",
+    "fan", "radiator", "porous", "inletvent", "outletvent", "intake",
+    "exhaust", "free", "mass", "couple", "blank", "dissolve", "slide",
+    "cyclic", "interface",
+}
+
+_TYPE_HINTS = {
+    "velocity-inlet": "inlet",
+    "velocityinlet": "inlet",
+    "mass-flow-inlet": "inlet",
+    "massflowinlet": "inlet",
+    "pressure-inlet": "inlet",
+    "pressureinlet": "inlet",
+    "pressure-outlet": "outlet",
+    "pressureoutlet": "outlet",
+    "outflow": "outlet",
+    "pressure-far-field": "pressure",
+    "wall": "wall",
+    "symmetry-plane": "symmetry",
+    "symmetryplane": "symmetry",
+    "periodic": "periodic",
+    "cyclic": "cyclic",
+    "interface": "interface",
+}
+
+
+def _normalize_bctype(hint: str, fallback: str = "wall") -> str:
+    """Map a user-supplied boundary-type hint to a valid CCM BoundaryType.
+
+    Accepts both the canonical CCM tokens and common Cradle/solver names
+    (e.g. ``velocity-inlet`` -> ``inlet``).  Falls back to *fallback* when
+    nothing matches, so a bad hint never produces an invalid CCM type.
+    """
+    h = str(hint).strip().lower()
+    if h in _CCM_BOUNDARY_TYPES:
+        return h
+    if h in _TYPE_HINTS:
+        return _TYPE_HINTS[h]
+    # Try a substring match against the hint table as a last resort.
+    for key, token in _TYPE_HINTS.items():
+        if key in h or h in key:
+            return token
+    return fallback
+
+
 def _spec_values(spec) -> list[int]:
     if isinstance(spec, (set, frozenset, list, tuple)):
         return [int(v) for v in spec]
@@ -148,13 +200,21 @@ def build_cell_table(
 
 
 def build_boundary_regions(
-    mesh: dict, boundary_types: Optional[dict[str, str]] = None
+    mesh: dict,
+    boundary_types: Optional[dict[str, str]] = None,
+    boundary_conditions: Optional[dict] = None,
 ) -> tuple[list[BoundaryRegion], np.ndarray]:
     """Return ``(regions, default_face_ids)``.
 
     ``LS_SurfaceRegions`` become CCM boundary regions (id 1..N).  Boundary
     faces not claimed by any surface region go to the implicit region 0
     (``Default_Boundary_Region``).
+
+    ``boundary_conditions`` is an optional, user-supplied mapping
+    ``{region_label: {"type": <ccm-type-or-hint>, "params": {<k>: <v>}}}``
+    (typically coming from a ``regions`` JSON).  It only *enriches* the
+    descriptive metadata of a region -- it never turns gph2ccm into a
+    solver-ready exporter.
     """
     ld = mesh.get("link_data") or {}
     n_faces = int(ld.get("n_faces", 0))
@@ -162,6 +222,12 @@ def build_boundary_regions(
     boundary_faces = np.asarray(ld.get("boundary_faces", []), dtype=np.int64)
 
     boundary_types = boundary_types or {}
+    # Normalise the optional structured-BC map once.
+    bc_map: dict[str, dict] = {}
+    for name, spec in (boundary_conditions or {}).items():
+        if not isinstance(spec, dict):
+            continue
+        bc_map[str(name)] = spec
 
     def _clean(name: str, fids) -> Optional[tuple[str, np.ndarray]]:
         f = np.asarray(fids, dtype=np.int64)
@@ -192,12 +258,22 @@ def build_boundary_regions(
         f = f[~used[f]]
         if f.size == 0:
             continue
+        btype = boundary_types.get(name, guess_boundary_type(name))
+        # Optional structured-BC override (descriptive only).
+        params: dict = {}
+        if name in bc_map:
+            spec = bc_map[name]
+            hint = spec.get("type")
+            if hint:
+                btype = _normalize_bctype(hint, fallback=btype)
+            params = dict(spec.get("params") or {})
         regions.append(
             BoundaryRegion(
                 id=len(regions) + 1,
                 label=name,
-                btype=boundary_types.get(name, guess_boundary_type(name)),
+                btype=btype,
                 face_ids=f,
+                params=params,
             )
         )
         used[f] = True
@@ -215,6 +291,7 @@ def build_model(
     boundary_types: Optional[dict[str, str]] = None,
     force_material: Optional[str] = None,
     split_regions: bool = False,
+    boundary_conditions: Optional[dict] = None,
 ) -> CcmModel:
     """Assemble the CCM mesh model from a ``parse_gph_mesh`` result."""
     vertices = np.asarray(mesh["vertices"], dtype=np.float64)
@@ -226,7 +303,11 @@ def build_model(
     cell_table, cell_types = build_cell_table(mesh, regions, force_material)
     if boundary_types is None and regions:
         boundary_types = regions.get("boundary_types") or None
-    boundary_regions, default_ids = build_boundary_regions(mesh, boundary_types)
+    if boundary_conditions is None and regions:
+        boundary_conditions = regions.get("boundary_conditions") or None
+    boundary_regions, default_ids = build_boundary_regions(
+        mesh, boundary_types, boundary_conditions
+    )
 
     neigh = np.asarray(ld["neighbor"], dtype=np.int64)
     owner = np.asarray(ld["owner"], dtype=np.int64)
