@@ -80,15 +80,14 @@
 
 ### 2.2 深度不足的部分
 
-- **测试自动化薄弱**：`tests/test_writer.py` 仅 2 个用例，覆盖基础读写与
-  model 组装；**split_regions / interface / verify-split 路径无自动化测试**，
-  依赖手动 STAR-CCM+ 导入验证。改 `ccmio.py` 无回归保护。
 - **精度**：顶点 float32 对大尺度坐标有精度上限（已知限制）。
 - **法向定向**：`cell_centroids` 用面心算术均值近似（非体积加权），畸形切单元
   上可能误判 interface 法向（L3）。
 - **接口虚拟 face id 的 `max_id` 语义**（H2）仍建议与 STAR-CCM+ 原生再核对。
 - **异常安全**：`write()` 无 `try/finally`，异常时文件句柄泄漏（M4）。
 - **参数失效**：`--chunk-vertices` 因 2D 分块 bug 实际不生效（M1）。
+- **元数据只写不读**：`gph2ccm.*` 节点写入后，仓库内没有官方途径把它读回来
+  （只有 gitignored 的探针脚本），用户拿到的"说明书"缺少阅读器。
 
 ---
 
@@ -135,13 +134,60 @@ Configuration=IN_PLACE / ConditionType=InternalInterface）、两侧带单元数
 
 ---
 
-## 6. 建议路线
+## 6. 下一步开发规划
 
-- **短期（保质量，低成本）**：✅ 已完成 —— H1 修复 + `verify` 在 `split_regions` 下放宽接口面唯一性 + 对应单测；结构化边界条件 + 描述性结果场/求解元数据（数据驱动、纯描述）。
-- **中期（扩广度）**：结果场/MRF/周期 **描述性元数据载体已落地**（数据驱动、纯描述）；
-  真正的求解属性写入（待上游 GPH 提供实际数据）、多 processor 分块写入
-  （需先解决 2D 分块 bug 的 vertex 路径）。
-- **长期（工程化）**：✅ CI 已接入 `test_writer.py`（合成多 region 网格用例已在
-  `test_split_regions_*` 中覆盖）；✅ README 已新增「描述性元数据（`gph2ccm.*` 节点）」
-  与「导入后须在 STAR-CCM+ 侧补充的清单」两节；
-  建立 `gphdecoding` 解析层与 `ccmio.dll` 行为的版本对照表。
+> 依据：完整度矩阵中仍为 ⚠️/❌ 的项（#6 / #12 / #13–#21）、深度不足清单
+> （M1 / M4 / L3 / H2 + 元数据只写不读）、与原生导出未对齐的实体。
+> 原则：**先还质量债 → 再把元数据闭环（用户可见价值最大）→ 求解就绪
+> 按依赖逐项解锁 → 工程化长期滚动**。
+
+### 阶段 A：加固现有能力（低风险，无外部依赖）
+
+| # | 任务 | 来源 | 验收标准 |
+|---|---|---|---|
+| A1 | `write()` 加 `try/finally`：异常时保证句柄与临时文件清理 | M4 | 注入异常后无句柄/临时文件泄漏，附单测 |
+| A2 | `--chunk-vertices` 处置：2D 数组已改单次写入，该参数名不副实 → 更名 `--chunk-1d`（仅影响 1-D 面流）或移除 | M1 | `--help` 与实际行为一致，README 同步 |
+| A3 | `cell_centroids` 改体积加权，降低 interface 法向误判 | L3 | 构造畸形切单元用例，法向不翻转 |
+| A4 | 接口虚拟 face id 的 `max_id` 语义与 `bladerotating_dm2.ccm` dump 逐项核对 | H2 | dump 对比一致或在文档中明确差异理由 |
+
+### 阶段 B：元数据闭环（把「说明书」变成「可执行的导入辅助」）
+
+当前 `gph2ccm.*` 只写不读——用户拿到 `.ccm` 后没有官方途径读回清单，
+README 的「导入后补充清单」只能靠手工对照。
+
+| # | 任务 | 说明 | 验收标准 |
+|---|---|---|---|
+| B1 | `python -m gph2ccm inspect out.ccm` | 读回全部 `gph2ccm.*` 节点，输出对应 README 清单的人读报告 | 元数据往返单测：写 → inspect → 解析结果与输入相等 |
+| B2 | STAR-CCM+ Java 宏生成器：`python -m gph2ccm macro out.ccm -o setup.java` | 生成读取元数据并自动创建 MRF / 周期 interface / BoundaryType 的宏**模板**（半自动，数值仍需人工确认） | 在 STAR-CCM+ batch 中跑通无报错 |
+| B3 | regions JSON schema 校验 + 示例 | `docs/regions.example.json` + 手写 validator（报错信息可定位行号），非法键早失败 | 非法 JSON 在转换前报错并退出码 ≠ 0 |
+| B4 | `diagnose_quality` 输出分级 | issues 按错误/警告分级并给修复建议（指向 STAR-CCM+ 的 repair 工具） | 3 级日志（error/warn/info），README 同步 |
+
+### 阶段 C：求解就绪导出（中期，逐项有前置依赖）
+
+| # | 任务 | 前置条件 | 说明 |
+|---|---|---|---|
+| C1 | `PeriodicBoundaries` / `Interfaces` 节点写入（周期配对从「描述」变「生效」） | 周期对几何匹配算法（主/影子面按转角/平移配对）；样本 `bladerotating_dm2.ccm` 已在手 | 矩阵 #6/#17，对叶轮机械用户价值最高 |
+| C2 | 初始场写入（`FieldSet` / `Field` / `FieldData`） | **先确认 GPH 侧有无场数据**——GPH 网格文件本身无场，需 FLDUTIL 结果文件，可能超出可行范围 | 矩阵 #13/#19；若上游无数据则永久停留在描述层 |
+| C3 | 多 processor 写入 | 先确认 `ccmio.dll` 2D 分块 bug 是否仅限 chunked 路径；或绕过为「每 processor 单文件」 | 矩阵 #12；价值取决于 STAR-CCM+ 导入侧是否真需要 |
+
+### 阶段 D：工程化与长期维护（滚动进行）
+
+- D1 **self-hosted CI runner**：在装有 STAR-CCM+ 的机器上挂
+  `GPH2CCM_CCMIO_DLL` secret，CI 跑全量 14 用例 + `ImportCcmCheck.java`
+  端到端导入（当前托管 runner 只能跑 3 个纯逻辑用例）。
+- D2 **版本行为对照表**：记录 `gphdecoding` 与 `ccmio.dll` 的已知行为差异
+  （2D 分块扁平偏移 bug、`CCMIOReadNodestr` 的 `char**` 签名、
+  32 字符节点名上限），避免换版本后重新踩坑。
+- D3 **性能基线**：330 万单元网格的写出耗时 / 内存峰值入基线，
+  防止回归（当前只有正确性回归）。
+- D4 高阶单元（#21）：legacy CCM 支持度调研，**低优先级**，有需求再启动。
+
+### 推荐执行顺序
+
+```
+A1 → A2 → B3 → B1 → B4 → A3/A4 → B2 → C1 → （C2/C3 视前置结论）→ D 滚动
+```
+
+理由：A 还的是当前用户可感知的质量债；B1/B3 让「导入后清单」从文档变成
+工具，是**投入产出比最高**的一步；C1 解锁叶轮机械场景的周期配对刚需；
+C2/C3 都有硬前置，先做可行性结论再排期，避免空转。
