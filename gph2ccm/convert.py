@@ -570,6 +570,41 @@ class CcmMeshWriter:
 
         t0 = time.perf_counter()
         root = ccmio.open_file(out)
+        try:
+            self._write_entities(root, model, ld)
+        except BaseException:
+            # M4: never leak the CCMIO file handle, and never leave a
+            # half-written, unreadable .ccm behind when a write fails.
+            self._discard_output(root, out)
+            raise
+        ccmio.close_file(root)
+
+        self._log(
+            f"[gph2ccm] wrote {out} "
+            f"[{time.perf_counter() - t0:.1f}s]"
+        )
+
+    def _discard_output(self, root, out: Path) -> None:
+        """Best-effort cleanup after a failed write (M4).
+
+        Closes the CCMIO file and removes the partial output so the user
+        never sees a corrupt ``.ccm``.  Cleanup errors are logged, not
+        raised -- the original failure must stay visible.
+        """
+        try:
+            self.ccmio.close_file(root)
+        except Exception as exc:  # noqa: BLE001 - cleanup must not mask the cause
+            self._log(f"[gph2ccm] warning: closing failed output: {exc}")
+        try:
+            out.unlink()
+        except OSError as exc:
+            self._log(f"[gph2ccm] warning: cannot remove partial output: {exc}")
+        else:
+            self._log(f"[gph2ccm] removed partial output: {out}")
+
+    def _write_entities(self, root, model: CcmModel, ld: dict) -> None:
+        """Write every CCM entity; the caller owns open/close of ``root``."""
+        ccmio = self.ccmio
         if self.title:
             ccmio.set_title(root, self.title)
 
@@ -746,12 +781,6 @@ class CcmMeshWriter:
 
         ccmio.write_state(state, problem, "gph2ccm")
         ccmio.write_processor(processor, vertices_node, topology)
-        ccmio.close_file(root)
-
-        self._log(
-            f"[gph2ccm] wrote {out} "
-            f"[{time.perf_counter() - t0:.1f}s]"
-        )
 
 
 def convert_gph(

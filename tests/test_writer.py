@@ -854,6 +854,52 @@ def test_quality_note() -> None:
     print("test_quality_note OK")
 
 
+class _CountingCCMIO:
+    """Proxy around a real CCMIO that counts close_file calls (A1 test)."""
+
+    def __init__(self, ccmio: "CCMIO", fail_on: str):
+        self._ccmio = ccmio
+        self._fail_on = fail_on
+        self.close_calls = 0
+
+    def __getattr__(self, name):
+        return getattr(self._ccmio, name)
+
+    def write_cells(self, *args, **kwargs):
+        if self._fail_on == "write_cells":
+            raise RuntimeError("injected failure")
+        return self._ccmio.write_cells(*args, **kwargs)
+
+    def close_file(self, root):
+        self.close_calls += 1
+        return self._ccmio.close_file(root)
+
+
+def test_write_failure_cleans_up() -> None:
+    """A mid-write failure closes the handle and removes the partial .ccm (M4)."""
+    mesh = make_synthetic_gph()
+    model = build_model(mesh, {"fluid_regions": ["fluid"]})
+
+    ccmio = _require_ccmio()
+    with tempfile.TemporaryDirectory(prefix="gph2ccm_m4_") as tmp:
+        out = Path(tmp) / "partial.ccm"
+        proxy = _CountingCCMIO(ccmio, fail_on="write_cells")
+        writer = CcmMeshWriter(proxy, out, verbose=False)
+
+        raised = False
+        try:
+            writer.write(model, mesh["link_data"])
+        except RuntimeError as exc:
+            raised = "injected failure" in str(exc)
+        assert raised, "the injected failure must propagate"
+
+        # Handle closed exactly once (by _discard_output), and no corrupt
+        # half-written file is left behind.
+        assert proxy.close_calls == 1
+        assert not out.exists()
+    print("test_write_failure_cleans_up OK")
+
+
 TESTS = [
     test_write_and_readback,
     test_model_build_parts_and_boundaries,
@@ -869,6 +915,7 @@ TESTS = [
     test_dimension_note,
     test_diagnose_quality_unit,
     test_quality_note,
+    test_write_failure_cleans_up,
 ]
 
 
