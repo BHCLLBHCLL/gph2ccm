@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 import sys
 
-from .convert import DEFAULT_CHUNK_FACES, DEFAULT_CHUNK_VERTICES, convert_gph
+from .convert import DEFAULT_CHUNK_FACES, convert_gph
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -91,8 +91,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--chunk-vertices",
         type=int,
-        default=DEFAULT_CHUNK_VERTICES,
-        help=f"vertices written per CCMIO call (default {DEFAULT_CHUNK_VERTICES})",
+        default=None,
+        help="DEPRECATED and ignored: vertices are always written in a single "
+        "CCMIO call (required by the ccmio.dll 2-D chunking limitation). Use "
+        "--chunk-faces to control the 1-D face stream chunk size.",
     )
     parser.add_argument(
         "--chunk-faces",
@@ -102,6 +104,13 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("-q", "--quiet", action="store_true", help="suppress progress")
     args = parser.parse_args(argv)
+
+    if args.chunk_vertices is not None:
+        print(
+            "[gph2ccm] warning: --chunk-vertices is deprecated and ignored; "
+            "vertices are always written in one CCMIO call.",
+            file=sys.stderr,
+        )
 
     try:
         convert_gph(
@@ -113,7 +122,6 @@ def main(argv: list[str] | None = None) -> int:
             compress=not args.no_compress,
             backup=args.backup,
             title=args.title,
-            chunk_vertices=args.chunk_vertices,
             chunk_faces=args.chunk_faces,
             verify=args.verify,
             force_material=(

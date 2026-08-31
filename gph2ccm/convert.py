@@ -32,7 +32,6 @@ from .model import (
     internal_face_cells,
 )
 
-DEFAULT_CHUNK_VERTICES = 1_000_000
 DEFAULT_CHUNK_FACES = 500_000
 
 
@@ -172,7 +171,6 @@ class CcmMeshWriter:
         out_path: str | Path,
         *,
         title: Optional[str] = None,
-        chunk_vertices: int = DEFAULT_CHUNK_VERTICES,
         chunk_faces: int = DEFAULT_CHUNK_FACES,
         cell_topology: Optional[str] = None,
         split_regions: bool = False,
@@ -181,7 +179,6 @@ class CcmMeshWriter:
         self.ccmio = ccmio
         self.out_path = Path(out_path)
         self.title = title
-        self.chunk_vertices = chunk_vertices
         self.chunk_faces = chunk_faces
         self.cell_topology = cell_topology
         self.split_regions = split_regions
@@ -793,7 +790,6 @@ def convert_gph(
     compress: bool = True,
     backup: bool = False,
     title: Optional[str] = None,
-    chunk_vertices: int = DEFAULT_CHUNK_VERTICES,
     chunk_faces: int = DEFAULT_CHUNK_FACES,
     cell_topology: Optional[str] = None,
     reorder: Optional[str] = None,
@@ -818,7 +814,6 @@ def convert_gph(
         compress=compress,
         backup=backup,
         title=title or gph_path.stem,
-        chunk_vertices=chunk_vertices,
         chunk_faces=chunk_faces,
         cell_topology=cell_topology,
         reorder=reorder,
@@ -839,7 +834,6 @@ def convert_model(
     compress: bool = True,
     backup: bool = False,
     title: Optional[str] = None,
-    chunk_vertices: int = DEFAULT_CHUNK_VERTICES,
     chunk_faces: int = DEFAULT_CHUNK_FACES,
     cell_topology: Optional[str] = None,
     reorder: Optional[str] = None,
@@ -905,7 +899,6 @@ def convert_model(
         ccmio,
         out_path,
         title=title,
-        chunk_vertices=chunk_vertices,
         chunk_faces=chunk_faces,
         cell_topology=cell_topology,
         split_regions=split_regions,
