@@ -180,9 +180,11 @@ README 的「导入后补充清单」只能靠手工对照。
 - D1 **self-hosted CI runner**：在装有 STAR-CCM+ 的机器上挂
   `GPH2CCM_CCMIO_DLL` secret，CI 跑全量 14 用例 + `ImportCcmCheck.java`
   端到端导入（当前托管 runner 只能跑 3 个纯逻辑用例）。
-- D2 **版本行为对照表**：记录 `gphdecoding` 与 `ccmio.dll` 的已知行为差异
-  （2D 分块扁平偏移 bug、`CCMIOReadNodestr` 的 `char**` 签名、
-  32 字符节点名上限），避免换版本后重新踩坑。
+- D2 ✅ **版本行为对照表**：`docs/version_behavior_table.md`（14 条实测差异：
+  2D 分块偏移 bug、`CCMIOReadNodestr` char** 签名、32 字符节点名上限、
+  无通用子节点枚举、Simulation 无 getBoundaryManager、MRF manager 注册时机、
+  虚拟 face id、InterfaceDefinitions 节点、启动器空格路径/wmic、GPH 无场/FPH 有场、
+  并行 CCM 每分区单文件），避免换版本后重新踩坑。
 - D3 **性能基线**：330 万单元网格的写出耗时 / 内存峰值入基线，
   防止回归（当前只有正确性回归）。
 - D4 高阶单元（#21）：legacy CCM 支持度调研，**低优先级**，有需求再启动。
