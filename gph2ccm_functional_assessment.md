@@ -81,13 +81,15 @@
 ### 2.2 深度不足的部分
 
 - **精度**：顶点 float32 对大尺度坐标有精度上限（已知限制）。
-- **法向定向**：`cell_centroids` 用面心算术均值近似（非体积加权），畸形切单元
-  上可能误判 interface 法向（L3）。
-- **接口虚拟 face id 的 `max_id` 语义**（H2）仍建议与 STAR-CCM+ 原生再核对。
-- **异常安全**：`write()` 无 `try/finally`，异常时文件句柄泄漏（M4）。
-- **参数失效**：`--chunk-vertices` 因 2D 分块 bug 实际不生效（M1）。
-- **元数据只写不读**：`gph2ccm.*` 节点写入后，仓库内没有官方途径把它读回来
-  （只有 gitignored 的探针脚本），用户拿到的"说明书"缺少阅读器。
+- ~~**法向定向**：`cell_centroids` 用面心算术均值近似（非体积加权），畸形切单元
+  上可能误判 interface 法向（L3）~~ —— ✅ 已改散度定理体积加权质心（`f0ea777`）。
+- ~~**接口虚拟 face id 的 `max_id` 语义**（H2）~~ —— ✅ 已与原生导出 dump 对照：
+  差异确认（原生用重复真实 id，本工具用 `+k·n_faces` 虚拟 id），保留现实现并把
+  理由与残余风险记录在 `conversion_issues_analysis.md`。
+- ~~**异常安全**：`write()` 无 `try/finally`，异常时文件句柄泄漏（M4）~~ —— ✅ 已修复（`3f8c18c`）。
+- ~~**参数失效**：`--chunk-vertices` 因 2D 分块 bug 实际不生效（M1）~~ —— ✅ 已移除（`b6d36e0`）。
+- ~~**元数据只写不读**：`gph2ccm.*` 节点写入后没有官方途径读回~~ —— ✅ 已补
+  `python -m gph2ccm inspect` 读回子命令（`0d53a20`）。
 
 ---
 
@@ -145,10 +147,10 @@ Configuration=IN_PLACE / ConditionType=InternalInterface）、两侧带单元数
 
 | # | 任务 | 来源 | 验收标准 |
 |---|---|---|---|
-| A1 | `write()` 加 `try/finally`：异常时保证句柄与临时文件清理 | M4 | 注入异常后无句柄/临时文件泄漏，附单测 |
-| A2 | `--chunk-vertices` 处置：2D 数组已改单次写入，该参数名不副实 → 更名 `--chunk-1d`（仅影响 1-D 面流）或移除 | M1 | `--help` 与实际行为一致，README 同步 |
-| A3 | `cell_centroids` 改体积加权，降低 interface 法向误判 | L3 | 构造畸形切单元用例，法向不翻转 |
-| A4 | 接口虚拟 face id 的 `max_id` 语义与 `bladerotating_dm2.ccm` dump 逐项核对 | H2 | dump 对比一致或在文档中明确差异理由 |
+| A1 ✅ | `write()` 加异常清理：异常时保证句柄与临时文件清理 | M4 | 注入异常后无句柄/临时文件泄漏，附单测（`3f8c18c`） |
+| A2 ✅ | `--chunk-vertices` 移除：CLI 保留弃用桩并告警，参数不再生效 | M1 | `--help` 与实际行为一致，README 同步（`b6d36e0`） |
+| A3 ✅ | `cell_centroids` 改散度定理体积加权，降低 interface 法向误判 | L3 | 畸形切单元用例质心精确（误差 1e-16 vs 算术均值 0.063，`f0ea777`） |
+| A4 ✅ | 接口虚拟 face id 的 `max_id` 语义与 `bladerotating_dm2.ccm` dump 逐项核对 | H2 | dump 对比完成：差异已确认并记录于 `conversion_issues_analysis.md`（保留现实现 + 残余风险说明） |
 
 ### 阶段 B：元数据闭环（把「说明书」变成「可执行的导入辅助」）
 

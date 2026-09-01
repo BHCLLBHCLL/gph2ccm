@@ -86,16 +86,34 @@
 - **建议**：verify 对 `split_regions` 模式应跳过 interface region 的唯一性检查，
   或按「每物理面允许出现在恰好两个 region」的语义放宽断言。
 
-### H2. grid-interface 虚拟 face id 的 `max_id` 语义存疑
-- **位置**：`convert.py:344-358`、`convert.py:195`（`_add_map` 用 `data.max()`）
-- **原因**：grid-interface 的两份 surface patch 用 `fids + 1 + n_faces` 与
-  `fids + 1 + 2*n_faces` 作为 map 值，`_add_map` 据此把 `max_id` 设为
-  接近 `2*n_faces` / `3*n_faces`。但文件实际只有 `n_faces` 个面。
-- **影响**：CCMIO 的 map `maxID` 通常表示「该映射引用的最大实体编号」。
-  声明 3 倍面数可能让 STAR-CCM+ 认为文件声明了大量不存在的面，轻则告警，
-  重则导入异常。该偏移方案缺乏对 STAR-CCM+ 原生导出 CCM 的对照验证。
-- **建议**：导出一个含 grid interface 的 STAR-CCM+ 原生 `.ccm`，比对它的
-  boundary-face map 与 interface surface map 的 id 编码方式，确认本实现一致。
+### H2. grid-interface 虚拟 face id 的 `max_id` 语义 — ✅ 已验证，记录差异（2026-09-01）
+- **位置**：`convert.py` `_write_interfaces`（surface patch 用 `fids + 1 + n_faces` 与
+  `fids + 1 + 2*n_faces` 作为 map 值，`_add_map` 据此把 `max_id` 设为接近
+  `2*n_faces` / `3*n_faces`）；文件实际只有 `n_faces` 个面。
+- **验证方法**：分别 dump 两份 `.ccm` 的全部 Map 实体——
+  1. STAR-CCM+ 原生导出 `tests/bladerotating_dm2.ccm`（含 ami_out/ami_in 滑移界面）；
+  2. 本工具输出 `two_region.ccm`（2000 cell / 5300 内部面 / 1000 边界面 / 200 接口面，
+     n_faces=6500，1 个 air_domain↔rotation1 接口）。
+- **dump 结果**：
+  - 原生文件：单一全局 face-id 空间。边界面 id 1..185902（各 region 连续分段），
+    内部面 id 185903..984566（Map-8 n=798664 maxID=984566）。
+    **interface 两侧（ami_out/ami_in，各 12566 面）是同一物理面的重复真实 id
+    （各占真实 id 段 39977..52542 / 53523..66088），不存在超出真实面数的虚拟 id。**
+  - 本工具：`air_to_rotation1` / `rotation1_to_air` 两个 wall 型重复 region 用
+    **真实接口面 id（两侧相同，2721..3348）**——与原生语义一致；
+    额外的 `air_to_rotation1 [Interface 1]` / `rotation1_to_air [Interface 1]`
+    两个 surface patch 用**虚拟 id** `fids+1+n_faces`（9221..9848）与
+    `fids+1+2*n_faces`（15721..16348），maxID 最大达 16348 ≈ 2.5×n_faces。
+- **结论**：差异确认存在——原生不声明虚拟 id，本工具为 `[Interface k]` 补丁
+  声明了 `+k·n_faces` 偏移的虚拟 id。**保留现有实现的理由**：
+  1. 该文件已在 STAR-CCM+ 20.02.007-R8（2502）实测可正常导入并生成 interface；
+  2. 虚拟 id 让每个 interface 侧在 map 空间里有独立连续的 id 段，便于 STAR-CCM+
+     把两个 `[Interface k]` patch 直接配成一对（原生则依赖重复真实 id + 名称配对）；
+  3. 改回原生语义需重排全局 face-id 空间，改动面大、收益不明确。
+- **残余风险**：maxID 超出真实面数属于对格式语义的"宽容解读"，更严格的第三方
+  读取器（或旧版 STAR-CCM+）可能告警或拒绝；未经其他 STAR-CCM+ 版本验证。
+  若未来遇到导入异常，优先排查此虚拟 id 方案（替代方案：像原生那样只用
+  重复真实 id + interface region 名称配对，去掉 `[Interface k]` 补丁或改用真实 id）。
 
 ---
 
@@ -189,8 +207,9 @@
 
 ## 优先级建议
 
-1. 先修 **M1**（移除或实现 `--chunk-vertices`）与 **M4**（句柄泄漏）——低成本、
-   直接提升健壮性。
-2. 验证 **H2**（对照 STAR-CCM+ 原生导出）——关系到 split_regions 模式可靠性。
+1. ~~先修 **M1**（移除或实现 `--chunk-vertices`）与 **M4**（句柄泄漏）~~
+   ——已完成（A2 / A1）。
+2. ~~验证 **H2**（对照 STAR-CCM+ 原生导出）~~——已完成（见上方"已验证"结论，
+   差异已记录，保留现实现）。
 3. 修 **H1**（verify 在 split 模式放宽）——让 `--verify` 在 split 模式可用。
 4. 其余按需处理。
