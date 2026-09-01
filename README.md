@@ -37,7 +37,7 @@ python -m gph2ccm mesh.gph out.ccm --verify
 
 | 选项 | 说明 |
 |------|------|
-| `--regions JSON` | fluid/solid 区域与材料定义（同 gph2foam 的 regions JSON） |
+| `--regions JSON` | fluid/solid 区域与材料定义（同 gph2foam 的 regions JSON）。转换前做 schema 校验，见下节 |
 | `--boundary-types JSON` | 边界区域 → CCM `BoundaryType` 覆盖，如 `{"open": "pressure"}` |
 | `--force-material fluid\|solid` | 强制所有单元材料类型（便于单区域导入） |
 | `--cell-topology none\|poly\|auto` | 显式写 `CellTopologyType`（默认 `poly=255`） |
@@ -47,6 +47,25 @@ python -m gph2ccm mesh.gph out.ccm --verify
 | `--no-compress` | 跳过 `CCMIOCompress` |
 | `--backup` | 已有输出时保留为 `.ccm.bak` 而非删除 |
 | `--verify` | 转换后用 CCMIO 读回并做拓扑一致性校验 |
+
+## regions JSON 校验
+
+regions JSON 的每个键都是可选的，因此**拼错的键或写错的类型以前会被静默
+忽略**——转换照常完成，但元数据根本没进 `.ccm`。现在 `--regions` 在转换前
+先做 schema 校验，一次报出全部问题（带行号），退出码 ≠ 0：
+
+```bash
+python -m gph2ccm mesh.gph out.ccm --regions mesh.json
+# error: invalid regions JSON:
+#   line 14: periodicx: unknown top-level key (allowed: ...)
+#   line 11: mrf[1].name: name too long: 'gph2ccm.MRF.a_very_long_...' is
+#            48 chars, CCM opt-node names are limited to 32
+```
+
+校验内容：顶层/嵌套键名白名单、各键类型、`mrf`/`periodic`/`fields` 条目必
+须有 `name`，以及**节点名不超过 32 字符**（超长会在写入时才报
+`kCCMIOBadParameterErr`，这里提前拦住）。完整示例见
+[`docs/regions.example.json`](docs/regions.example.json)。
 
 ## 转换结果说明
 

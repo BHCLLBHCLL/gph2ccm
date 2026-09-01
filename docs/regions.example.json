@@ -1,0 +1,58 @@
+{
+  "fluid_regions": ["air_domain", "rotor"],
+  "solid_regions": ["casing"],
+
+  "boundary_types": {
+    "open": "pressure",
+    "@PartSurface_air_domain": "wall"
+  },
+
+  "boundary_conditions": {
+    "inlet": {
+      "type": "velocity-inlet",
+      "params": {
+        "velocity": 5.0,
+        "turb-intensity": 0.05
+      }
+    },
+    "outlet": {
+      "type": "pressure-outlet",
+      "params": {
+        "pressure": 0.0
+      }
+    }
+  },
+
+  "fields": [
+    { "name": "Pressure", "location": "cell", "type": "scalar", "units": "Pa" },
+    { "name": "Velocity", "location": "cell", "type": "vector", "units": "m/s" }
+  ],
+
+  "solver_settings": {
+    "steady": true,
+    "turb.model": "k-epsilon"
+  },
+
+  "mrf": [
+    {
+      "name": "rotor",
+      "region": "rotor",
+      "type": "rotating",
+      "axis": "0 0 1",
+      "origin": "0 0 0",
+      "omega": 157.08,
+      "units": "rad/s"
+    }
+  ],
+
+  "periodic": [
+    {
+      "name": "per-1",
+      "region": "side-a",
+      "shadow": "side-b",
+      "type": "rotational",
+      "axis": "0 0 1",
+      "angle": 60
+    }
+  ]
+}

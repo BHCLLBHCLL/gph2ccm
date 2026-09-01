@@ -31,18 +31,22 @@ from .model import (
     face_stream,
     internal_face_cells,
 )
+from .regions_schema import load_regions_checked
 
 DEFAULT_CHUNK_FACES = 500_000
 
 
 def load_regions(path: Optional[str | Path]) -> Optional[dict]:
+    """Load the regions JSON and validate it against the gph2ccm schema.
+
+    Every key is optional, so a misspelled key or a wrong type used to be
+    ignored silently: the conversion finished, but the metadata never made it
+    into the ``.ccm``.  Validating up front turns that into an actionable
+    error (with line numbers) before any conversion work starts (B3).
+    """
     if path is None:
         return None
-    p = Path(path)
-    if not p.is_file():
-        raise FileNotFoundError(f"regions JSON not found: {p}")
-    with open(p, "r", encoding="utf-8") as f:
-        return json.load(f)
+    return load_regions_checked(path)
 
 
 def load_boundary_types(path: Optional[str | Path]) -> dict[str, str]:

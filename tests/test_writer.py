@@ -900,6 +900,85 @@ def test_write_failure_cleans_up() -> None:
     print("test_write_failure_cleans_up OK")
 
 
+# -- B3: regions JSON schema validation -----------------------------------
+
+
+def test_regions_schema_valid() -> None:
+    """The shipped example validates cleanly; an empty dict is also valid."""
+    from gph2ccm.regions_schema import load_regions_checked, validate_regions
+
+    assert validate_regions({}) == []
+
+    example = (
+        Path(__file__).resolve().parent.parent / "docs" / "regions.example.json"
+    )
+    assert example.is_file(), f"missing example regions JSON: {example}"
+    regions = load_regions_checked(example)
+    assert regions["fluid_regions"] == ["air_domain", "rotor"]
+    assert len(regions["mrf"]) == 1
+    assert len(regions["periodic"]) == 1
+    print("test_regions_schema_valid OK")
+
+
+def test_regions_schema_reports_errors() -> None:
+    """Misspelled / mistyped keys are reported instead of silently ignored."""
+    from gph2ccm.regions_schema import validate_regions
+
+    errors = validate_regions(
+        {
+            "fluid_regions": "air",  # not a list
+            "perodic": [],  # misspelled top-level key
+            "fields": [{"location": "cell"}],  # missing name
+            "boundary_conditions": {"inlet": {"type": "inlet", "params": []}},
+            "solver_settings": {"relax": {"nested": 1}},
+        }
+    )
+    joined = "\n".join(errors)
+    assert "fluid_regions: expected a list" in joined
+    assert "perodic: unknown top-level key" in joined
+    assert "fields[0].name: required" in joined
+    assert "boundary_conditions.inlet.params: expected an object" in joined
+    assert "solver_settings.relax: expected a scalar" in joined
+    print("test_regions_schema_reports_errors OK")
+
+
+def test_regions_schema_line_numbers() -> None:
+    """Errors carry a line number when the raw JSON text is available."""
+    import json
+
+    from gph2ccm.regions_schema import validate_regions
+
+    text = (
+        "{\n"
+        '  "fluid_regions": ["air"],\n'
+        '  "mrf": [\n'
+        '    {"name": "rotor", "omega": 100},\n'
+        '    {"nam": "stator"}\n'  # line 5: misspelled key
+        "  ]\n"
+        "}\n"
+    )
+    errors = validate_regions(json.loads(text), text)
+    assert any(e.startswith("line 5:") for e in errors), errors
+    assert any("mrf[1].nam: unknown key" in e for e in errors), errors
+    print("test_regions_schema_line_numbers OK")
+
+
+def test_regions_schema_node_name_limit() -> None:
+    """Names that would exceed the 32-char CCM opt-node limit are rejected."""
+    from gph2ccm.regions_schema import MAX_NODE_NAME, validate_regions
+
+    errors = validate_regions(
+        {"fields": [{"name": "a_very_long_field_name_over_the_limit"}]}
+    )
+    assert errors, "a 45-char node name must be rejected"
+    assert "limit" in errors[0]
+
+    # Short names stay valid: len("gph2ccm.Field.Velocity") == 21 <= 32.
+    assert validate_regions({"fields": [{"name": "Velocity"}]}) == []
+    assert MAX_NODE_NAME == 32
+    print("test_regions_schema_node_name_limit OK")
+
+
 TESTS = [
     test_write_and_readback,
     test_model_build_parts_and_boundaries,
@@ -916,6 +995,10 @@ TESTS = [
     test_diagnose_quality_unit,
     test_quality_note,
     test_write_failure_cleans_up,
+    test_regions_schema_valid,
+    test_regions_schema_reports_errors,
+    test_regions_schema_line_numbers,
+    test_regions_schema_node_name_limit,
 ]
 
 
