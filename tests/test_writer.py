@@ -1133,6 +1133,61 @@ def test_inspect_report_checklist() -> None:
     print("test_inspect_report_checklist OK")
 
 
+def test_cell_centroids_area_weighted() -> None:
+    """Divergence-theorem centroid is exact on a distorted cell (A3 / L3).
+
+    A unit cube with a tall pyramid on top is the cut-cell pathology that
+    used to mis-orient interface normals: the four slanted triangular faces
+    sit far above the cell body, and the old arithmetic mean of face
+    centroids weighted them equally with the big bottom face.
+    """
+    from gph2ccm.convert import cell_centroids, face_centroids_and_normals
+
+    vertices = np.array(
+        [
+            [0, 0, 0], [1, 0, 0], [1, 1, 0], [0, 1, 0],  # bottom
+            [0, 0, 1], [1, 0, 1], [1, 1, 1], [0, 1, 1],  # cube top
+            [0.5, 0.5, 3],                                # apex
+        ],
+        dtype=float,
+    )
+    faces = [
+        [0, 3, 2, 1],  # bottom
+        [0, 1, 5, 4],  # y=0
+        [1, 2, 6, 5],  # x=1
+        [2, 3, 7, 6],  # y=1
+        [3, 0, 4, 7],  # x=0
+        [4, 5, 8], [5, 6, 8], [6, 7, 8], [7, 4, 8],  # pyramid sides
+    ]
+    npe = np.array([len(f) for f in faces], dtype=np.int64)
+    ld = {
+        "npe": npe,
+        "face_offsets": np.concatenate([[0], np.cumsum(npe)]),
+        "face_nodes": np.array([n for f in faces for n in f], dtype=np.int64),
+        "n_faces": len(faces),
+        "owner": np.zeros(len(faces), dtype=np.int64),
+        "neighbor": np.full(len(faces), -1, dtype=np.int64),
+    }
+
+    fc, area_vec = face_centroids_and_normals(ld, vertices)
+    centroid = cell_centroids(ld, 1, fc, area_vec)[0]
+
+    # Volume from the same divergence sum is exact for planar faces: 5/3.
+    dot = np.einsum("ij,ij->i", fc, area_vec)
+    assert abs(dot.sum() / 3.0 - 5.0 / 3.0) < 1e-12
+
+    # True centroid z of cube(1) + pyramid(2/3, centroid 1.5) = 0.9.
+    assert abs(centroid[0] - 0.5) < 1e-9
+    assert abs(centroid[1] - 0.5) < 1e-9
+    assert abs(centroid[2] - 0.9) < 1e-9
+
+    # The old arithmetic mean is demonstrably worse on this cell (documents
+    # the L3 defect this test locks out).
+    arith = np.mean([vertices[f].mean(axis=0) for f in faces], axis=0)
+    assert abs(arith[2] - 0.9) > 0.01
+    print("test_cell_centroids_area_weighted OK")
+
+
 TESTS = [
     test_write_and_readback,
     test_model_build_parts_and_boundaries,
@@ -1156,6 +1211,7 @@ TESTS = [
     test_bc_keys_index,
     test_inspect_roundtrip,
     test_inspect_report_checklist,
+    test_cell_centroids_area_weighted,
 ]
 
 

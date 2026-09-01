@@ -111,18 +111,61 @@ def face_centroids_and_normals(ld: dict, vertices: np.ndarray):
     return fc, area_vec
 
 
-def cell_centroids(ld: dict, n_cells: int, face_centroids: np.ndarray) -> np.ndarray:
-    """Cell centroid as the mean of its face centroids."""
+def cell_centroids(
+    ld: dict, n_cells: int, face_centroids: np.ndarray, area_vec: np.ndarray
+) -> np.ndarray:
+    """Cell centroid via the divergence theorem (area-weighted, A3 / L3).
+
+    For a closed polyhedron with outward area vectors ``S_f`` and face
+    centroids ``c_f``::
+
+        V = (1/3) sum_f c_f . S_f
+        C = (1/(4V)) sum_f (c_f . S_f) c_f
+
+    Both sums are origin-independent and weight each face by its area, so a
+    sliver face can no longer drag the centroid the way the previous
+    arithmetic mean of face centroids did -- that mean is what mis-oriented
+    interface normals on distorted cut cells (issue L3).
+
+    ``area_vec`` is the signed area vector of the GPH winding, which points
+    from owner to neighbour: outward for the owner cell, inward for the
+    neighbour.  Cells with a degenerate/zero volume fall back to the old
+    arithmetic mean so open or pathological cells still get a usable point.
+    """
     owner = np.asarray(ld["owner"], dtype=np.int64)
     neigh = np.asarray(ld["neighbor"], dtype=np.int64)
+    valid = neigh >= 0
+
+    # c_f . S_f with S_f outward for the owner, inward for the neighbour.
+    dot = np.einsum("ij,ij->i", face_centroids, area_vec)
+
+    wsum = np.zeros((n_cells, 3))
+    np.add.at(wsum, owner, face_centroids * dot[:, None])
+    np.add.at(wsum, neigh[valid], -(face_centroids[valid] * dot[valid, None]))
+    vsum = np.zeros(n_cells)
+    np.add.at(vsum, owner, dot)
+    np.add.at(vsum, neigh[valid], -dot[valid])
+    vol = vsum / 3.0
+
+    with np.errstate(divide="ignore", invalid="ignore"):
+        weighted = wsum / (4.0 * vol)[:, None]
+    good = np.isfinite(weighted).all(axis=1) & (vol > 0)
+
+    if good.all():
+        return weighted
+
+    # Fallback: arithmetic mean of face centroids (previous behaviour) for
+    # zero/negative-volume or non-finite cells.
     csum = np.zeros((n_cells, 3))
     np.add.at(csum, owner, face_centroids)
-    valid = neigh >= 0
     np.add.at(csum, neigh[valid], face_centroids[valid])
     cnt = np.bincount(
         np.concatenate([owner, neigh[valid]]), minlength=n_cells
     )
-    return csum / np.maximum(cnt[:, None], 1)
+    fallback = csum / np.maximum(cnt[:, None], 1)
+    out = weighted.copy()
+    out[~good] = fallback[~good]
+    return out
 
 
 def orient_interface_streams(
@@ -292,7 +335,7 @@ class CcmMeshWriter:
             f"[gph2ccm] writing {len(model.interface_faces)} region interface(s) ..."
         )
         fc, area_vec = face_centroids_and_normals(ld, model.vertices)
-        centroids = cell_centroids(ld, model.n_cells, fc)
+        centroids = cell_centroids(ld, model.n_cells, fc, area_vec)
         owner_all = np.asarray(ld["owner"], dtype=np.int64)
         neigh_all = np.asarray(ld["neighbor"], dtype=np.int64)
         n_faces = int(ld["n_faces"])
