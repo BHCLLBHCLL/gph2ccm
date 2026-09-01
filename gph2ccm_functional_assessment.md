@@ -172,8 +172,8 @@ README 的「导入后补充清单」只能靠手工对照。
 | # | 任务 | 前置条件 | 说明 |
 |---|---|---|---|
 | C1 ✅ | `PeriodicBoundaries` / `Interfaces` 节点写入（周期配对从「描述」变「生效」） | 周期对几何匹配算法（主/影子面按转角/平移配对）；样本 `bladerotating_dm2.ccm` 已在手 | 矩阵 #6/#17，对叶轮机械用户价值最高 |
-| C2 | 初始场写入（`FieldSet` / `Field` / `FieldData`） | **先确认 GPH 侧有无场数据**——GPH 网格文件本身无场，需 FLDUTIL 结果文件，可能超出可行范围 | 矩阵 #13/#19；若上游无数据则永久停留在描述层 |
-| C3 | 多 processor 写入 | 先确认 `ccmio.dll` 2D 分块 bug 是否仅限 chunked 路径；或绕过为「每 processor 单文件」 | 矩阵 #12；价值取决于 STAR-CCM+ 导入侧是否真需要 |
+| C2 | 初始场写入（`FieldSet` / `Field` / `FieldData`） | **可行性结论（2026-09-02）**：✅ 技术可行——libccmio 有完整 Field API（`CCMIONewField` + `CCMIOWriteFieldDataf` 等，见 `ccmio.h:452,884-970`）；GPH 网格本身无场，但同体系的 **FPH 结果文件**（魔数 `CRDL-FLD`）携带 FlowSolution，`gphdecoding/fph2cgns.py` 已能解析并写 CGNS FlowSolution。**排期**：作为独立里程碑（FPH 输入扩展 + 场-网格 cell 掩码对应 + CCM FieldPhase/Field/FieldData 写入），中等工作量；用户无 FPH 结果文件时维持现状（`gph2ccm.Field.*` 描述层） | 矩阵 #13/#19；依赖 FPH 结果文件，需用户配合提供 |
+| C3 | 多 processor 写入 | **可行性结论（2026-09-02）**：✅ 技术可行——`CCMIOWriteProcessor` 的 `verticesFile/topologyFile/initialFieldFile/solutionFile` 参数证实 STAR-CCM+ 并行 CCM 采用**每分区独立文件**组织（主 `.ccm` + 每 processor 一个分区文件），libccmio 完整支持；2D 分块 bug 与分区无关（单次写入已规避）。**排期**：靠后——主要工作量在网格分区算法（几何/METIS 级），且 STAR-CCM+ 导入单 processor CCM 后会自动分区，多 processor 文件的导入侧收益待确认；无明确需求前维持单 processor + `gph2ccm.Note.MultiProcessor` 自说明 | 矩阵 #12；价值取决于导入侧是否真需要预分区 |
 
 ### 阶段 D：工程化与长期维护（滚动进行）
 
@@ -190,7 +190,7 @@ README 的「导入后补充清单」只能靠手工对照。
 ### 推荐执行顺序
 
 ```
-A1 → A2 → B3 → B1 → B4 → A3/A4 → B2 → C1 → （C2/C3 视前置结论）→ D 滚动
+A1 → A2 → B3 → B1 → B4 → A3/A4 → B2 → C1 → （C2/C3 可行性结论已出：✅ 均可行，C2 依赖 FPH 结果文件排为独立里程碑、C3 无导入侧需求证据前靠后）→ D 滚动
 ```
 
 理由：A 还的是当前用户可感知的质量债；B1/B3 让「导入后清单」从文档变成
