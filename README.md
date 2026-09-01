@@ -35,6 +35,10 @@ python -m gph2ccm mesh.gph out.ccm --verify
 # 读回 .ccm 里携带的描述性元数据，打印「导入后须补充」清单
 python -m gph2ccm inspect out.ccm
 python -m gph2ccm inspect out.ccm --json   # 机器可读原始元数据
+
+# 从元数据生成 STAR-CCM+ Java 设置宏（边界类型 / MRF / 周期配对）
+python -m gph2ccm macro out.ccm -o setup.java
+python -m gph2ccm macro out.ccm -o setup.java --no-import   # 不含 mesh 自动导入块
 ```
 
 常用选项：
@@ -163,6 +167,40 @@ MRF 旋转参考系（1 个）—— 需在 STAR-CCM+ 手动建立
   [ ] 材料与物理模型（Continua → Physics）
   ...
 ```
+
+### 生成 STAR-CCM+ 设置宏
+
+`gph2ccm macro` 把同一份元数据翻译成 Java 宏（`setup.java`），在 STAR-CCM+
+里播放即可自动完成清单中可机械化的一部分——边界类型、MRF 旋转参考系、
+周期/滑移 interface 配对：
+
+```bash
+$ python -m gph2ccm macro out.ccm -o setup.java
+[gph2ccm] wrote setup.java
+[gph2ccm] run in STAR-CCM+: Tools > Macros > Play Macro, or starccm+ -batch <sim> macro.java
+```
+
+用法（二选一）：
+
+1. GUI：打开已导入网格的 `.sim` → Tools > Macros > Play Macro 选择 `setup.java`
+2. 批处理：`starccm+ -batch setup.java model.sim`；或全新会话
+   `starccm+ -new -batch setup.java`（宏检测到无 region 时先用 `importMeshFiles`
+   自动导入网格，用 `--no-import` 可去掉该块）
+
+宏是**半自动模板**：
+
+- 边界类型按 `BoundaryType` 自动设置（`inlet→InletBoundary`、`pressure→PressureBoundary`、
+  `wall→WallBoundary`、`symmetry→SymmetryBoundary` 等，见 `macro.py` 映射表）；
+  周期/滑移类 token（`periodic`/`cyclic`/`slide`/`interface`）不会乱设，只留注释。
+- MRF 用官方 journal 范式（`UserRotatingReferenceFrame` + `MotionSpecification`）
+  自动创建并指派到 region；转轴/原点/角速度来自 `gph2ccm.MRF.*`。
+- 周期配对用 `createDirectInterface` 把主/影子 boundary 连成 interface。
+- 边界条件**数值**（速度/压力等）只以 `println` TODO 提醒输出，仍需人工确认。
+- 每段语句独立 `try/catch`：缺 region/boundary 时打印告警并继续，不会中断。
+
+已知限制：全新 `starccm+ -new -batch` 空会话中 motion 模块尚未初始化，
+`ReferenceFrameManager` 未注册，MRF 块会打印告警跳过——在已导入网格/已建
+continuum 的会话（GUI 或 `-batch <sim>`）里可正常运行。
 
 ## 导入后须在 STAR-CCM+ 侧补充的清单
 

@@ -45,12 +45,71 @@ def _main_inspect(argv: list[str]) -> int:
     return 0
 
 
+def _main_macro(argv: list[str]) -> int:
+    """``gph2ccm macro <file.ccm>`` -- generate a STAR-CCM+ setup macro."""
+    parser = argparse.ArgumentParser(
+        prog="python -m gph2ccm macro",
+        description=(
+            "Generate a STAR-CCM+ Java macro from the gph2ccm.* metadata in a "
+            ".ccm file (boundary types, MRF reference frames, periodic "
+            "pairings). Numeric boundary values are emitted as reminders."
+        ),
+    )
+    parser.add_argument("ccm", help="a .ccm file produced by gph2ccm")
+    parser.add_argument(
+        "-o",
+        "--output",
+        default=None,
+        help="output .java path (default: <ccm stem>_setup.java next to it)",
+    )
+    parser.add_argument(
+        "--class-name",
+        default=None,
+        help="Java class name (default: derived from the file stem)",
+    )
+    parser.add_argument(
+        "--no-import",
+        action="store_true",
+        help="do not embed the auto mesh-import block (assume the mesh is "
+        "already loaded in the target simulation)",
+    )
+    args = parser.parse_args(argv)
+
+    from pathlib import Path
+
+    from .macro import generate_macro_for_file
+
+    out = Path(args.output) if args.output else Path(args.ccm).with_name(
+        Path(args.ccm).stem + "_setup.java"
+    )
+    cls = args.class_name or ("Gph2ccm_" + Path(args.ccm).stem)
+    try:
+        source = generate_macro_for_file(
+            args.ccm, class_name=cls, ccm_path=None if args.no_import else args.ccm
+        )
+    except FileNotFoundError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    except Exception as exc:  # keep CLI output tidy
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    out.write_text(source, encoding="utf-8")
+    print(f"[gph2ccm] wrote {out}")
+    print(
+        "[gph2ccm] run in STAR-CCM+: Tools > Macros > Play Macro, or "
+        "starccm+ -batch <sim> macro.java"
+    )
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     # Subcommand dispatch: "gph2ccm inspect <file.ccm>".  Kept as a prefix
     # check so the existing positional usage (gph + output) is untouched.
     if argv and argv[0] == "inspect":
         return _main_inspect(argv[1:])
+    if argv and argv[0] == "macro":
+        return _main_macro(argv[1:])
 
     parser = argparse.ArgumentParser(
         prog="python -m gph2ccm",

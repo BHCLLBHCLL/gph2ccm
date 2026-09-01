@@ -1188,6 +1188,52 @@ def test_cell_centroids_area_weighted() -> None:
     print("test_cell_centroids_area_weighted OK")
 
 
+def test_macro_generation() -> None:
+    """Java setup macro carries boundary types, MRF and pairing code (B2)."""
+    from gph2ccm.inspect import read_metadata
+    from gph2ccm.macro import generate_macro_for_file, sanitize_class_name
+
+    assert sanitize_class_name("case 01-final") == "case_01_final"
+    assert sanitize_class_name("9run") == "G_9run"
+
+    ccmio = _require_ccmio()
+    with tempfile.TemporaryDirectory(prefix="gph2ccm_mac_") as tmp:
+        out = Path(tmp) / "meta.ccm"
+        _write_full_metadata_case(ccmio, out)
+
+        src = generate_macro_for_file(out, class_name="Setup Meta")
+        assert "public class Setup_Meta extends StarMacro {" in src
+        assert "import star.motion.*;" in src
+        # Boundary types (normalised tokens -> star.common classes).
+        assert 'findBoundary(simulation_0, "inlet")' in src
+        assert "b.setBoundaryType(InletBoundary.class);" in src
+        assert 'findBoundary(simulation_0, "outlet")' in src
+        assert "b.setBoundaryType(PressureBoundary.class);" in src
+        # Boundary lookup scans regions (Simulation has no getBoundaryManager).
+        assert "r.getBoundaryManager().getBoundary(name)" in src
+        # MRF: frame creation, rotation rate, axis definition, assignment.
+        assert "createReferenceFrame(UserRotatingReferenceFrame.class" in src
+        assert "getRotationRate().setValue(157.08);" in src
+        assert "getAxis().setDefinition(" in src
+        assert "MotionSpecification" in src
+        assert ".setReferenceFrame(userRotatingReferenceFrame_0);" in src
+        # Periodic pairing: direct interface between the two boundaries.
+        assert 'findBoundary(simulation_0, "side-a")' in src
+        assert "simulation_0.getInterfaceManager().createDirectInterface(p0, p1);" in src
+        # BC params surface as TODO reminders.
+        assert "velocity = 5.0" in src
+        # Every generated statement block is failure-tolerant.
+        assert src.count("try {") >= 3
+
+        # Metadata read-back drives the same content (round-trip consistency).
+        meta = read_metadata(out, ccmio=ccmio)
+        src2 = generate_macro_for_file(out, ccm_path=None, class_name="X")
+        assert "importMeshFiles" not in src2
+        assert "importMeshFiles" in src  # embedded path by default
+        assert meta["mrf"][0]["region"] == "fluid"
+    print("test_macro_generation OK")
+
+
 TESTS = [
     test_write_and_readback,
     test_model_build_parts_and_boundaries,
@@ -1212,6 +1258,7 @@ TESTS = [
     test_inspect_roundtrip,
     test_inspect_report_checklist,
     test_cell_centroids_area_weighted,
+    test_macro_generation,
 ]
 
 

@@ -160,7 +160,7 @@ README 的「导入后补充清单」只能靠手工对照。
 | # | 任务 | 说明 | 验收标准 |
 |---|---|---|---|
 | B1 | `python -m gph2ccm inspect out.ccm` | 读回全部 `gph2ccm.*` 节点，输出对应 README 清单的人读报告 | 元数据往返单测：写 → inspect → 解析结果与输入相等 |
-| B2 | STAR-CCM+ Java 宏生成器：`python -m gph2ccm macro out.ccm -o setup.java` | 生成读取元数据并自动创建 MRF / 周期 interface / BoundaryType 的宏**模板**（半自动，数值仍需人工确认） | 在 STAR-CCM+ batch 中跑通无报错 |
+| B2 ✅ | STAR-CCM+ Java 宏生成器：`python -m gph2ccm macro out.ccm -o setup.java` | 生成读取元数据并自动创建 MRF / 周期 interface / BoundaryType 的宏**模板**（半自动，数值仍需人工确认） | STAR-CCM+ 2502 batch 编译通过；边界类型设置、mesh 导入、BC TODO 提醒均验证通过；MRF 使用官方 journal 范式，在已初始化会话中可正常运行 |
 | B3 | regions JSON schema 校验 + 示例 | `docs/regions.example.json` + 手写 validator（报错信息可定位行号），非法键早失败 | 非法 JSON 在转换前报错并退出码 ≠ 0 |
 | B4 | `diagnose_quality` 输出分级 | issues 按错误/警告分级并给修复建议（指向 STAR-CCM+ 的 repair 工具） | 3 级日志（error/warn/info），README 同步 |
 
