@@ -31,6 +31,10 @@ python -m gph2ccm mesh.gph out.ccm --regions mesh.json
 
 # 校验生成文件（读回并检查拓扑一致性）
 python -m gph2ccm mesh.gph out.ccm --verify
+
+# 读回 .ccm 里携带的描述性元数据，打印「导入后须补充」清单
+python -m gph2ccm inspect out.ccm
+python -m gph2ccm inspect out.ccm --json   # 机器可读原始元数据
 ```
 
 常用选项：
@@ -120,7 +124,8 @@ STAR-CCM+ 导入时会忽略它们，网格不受影响；但可以用
 | —（索引） | `gph2ccm.MRFNames` | 逗号分隔的 MRF 名列表 |
 | `periodic` | `gph2ccm.Periodic.<name>` | `<region>\|<shadow>\|<type>\|<axis>\|<angle>` |
 | —（索引） | `gph2ccm.PeriodicNames` | 逗号分隔的周期对名列表 |
-| 边界区域 `params` | 边界区域上的参数字典 | 结构化的边界条件描述（仅类型与参数名，不含数值场） |
+| 边界区域 `params` | 每个边界区域上的 `gph2ccm.BC.<k>` | 结构化的边界条件描述（仅类型与参数名，不含数值场） |
+| —（索引） | 同区域上的 `gph2ccm.BCKeys` | 逗号分隔的参数名列表（公开 CCMIO API 无法枚举子节点，故建索引） |
 | 自动生成 | `gph2ccm.Note.Processors` | `1` |
 | 自动生成 | `gph2ccm.Note.MultiProcessor` | `unsupported` |
 | 自动生成 | `gph2ccm.Note.Dimension` | `2D` / `3D`（按顶点包围盒各方向跨度判断） |
@@ -132,6 +137,30 @@ STAR-CCM+ 导入时会忽略它们，网格不受影响；但可以用
 
 未提供 regions JSON 时，上述 `Field.*` / `Solver.*` / `MRF.*` / `Periodic.*`
 节点不会写出，行为与旧版完全一致。
+
+### 读回元数据
+
+`gph2ccm inspect` 把这些节点读回来，按 README 的清单格式打印，可直接当作
+导入 STAR-CCM+ 后的操作依据：
+
+```bash
+$ python -m gph2ccm inspect out.ccm
+gph2ccm inspect: out.ccm
+
+能力 / 限制
+    Processors      1
+    Dimension       3D
+
+场变量（2 个，仅描述，无场数据）
+    Pressure  cell/scalar [Pa]
+
+MRF 旋转参考系（1 个）—— 需在 STAR-CCM+ 手动建立
+  - rotor: region=fluid type=rotating omega=157.08 rad/s
+
+以下必须在 STAR-CCM+ 中补充（转换器不会自动创建）：
+  [ ] 材料与物理模型（Continua → Physics）
+  ...
+```
 
 ## 导入后须在 STAR-CCM+ 侧补充的清单
 

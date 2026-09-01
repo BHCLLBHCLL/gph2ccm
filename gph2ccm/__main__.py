@@ -8,7 +8,50 @@ import sys
 from .convert import DEFAULT_CHUNK_FACES, convert_gph
 
 
+def _main_inspect(argv: list[str]) -> int:
+    """``gph2ccm inspect <file.ccm>`` -- print the descriptive metadata."""
+    parser = argparse.ArgumentParser(
+        prog="python -m gph2ccm inspect",
+        description=(
+            "Read back the gph2ccm.* descriptive metadata written into a "
+            ".ccm file and print the STAR-CCM+ to-do checklist."
+        ),
+    )
+    parser.add_argument("ccm", help="a .ccm file produced by gph2ccm")
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        help="dump the raw metadata as JSON instead of the human report",
+    )
+    args = parser.parse_args(argv)
+
+    from .inspect import format_report, read_metadata
+
+    try:
+        meta = read_metadata(args.ccm)
+    except FileNotFoundError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    except Exception as exc:  # keep CLI output tidy
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+
+    if args.json:
+        import json
+
+        print(json.dumps(meta, indent=2, ensure_ascii=False))
+    else:
+        print(format_report(meta))
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
+    argv = list(sys.argv[1:] if argv is None else argv)
+    # Subcommand dispatch: "gph2ccm inspect <file.ccm>".  Kept as a prefix
+    # check so the existing positional usage (gph + output) is untouched.
+    if argv and argv[0] == "inspect":
+        return _main_inspect(argv[1:])
+
     parser = argparse.ArgumentParser(
         prog="python -m gph2ccm",
         description="Convert Software Cradle GPH meshes to STAR-CCM+ CCM files.",

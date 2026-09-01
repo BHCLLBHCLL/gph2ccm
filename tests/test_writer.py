@@ -979,6 +979,139 @@ def test_regions_schema_node_name_limit() -> None:
     print("test_regions_schema_node_name_limit OK")
 
 
+# -- B1: read back the gph2ccm.* metadata ----------------------------------
+
+
+def _write_full_metadata_case(ccmio: "CCMIO", out: Path) -> dict:
+    """Write a mesh carrying every kind of descriptive metadata."""
+    mesh = make_synthetic_gph()
+    regions = {
+        "fluid_regions": ["fluid"],
+        "boundary_conditions": {
+            "inlet": {"type": "velocity-inlet", "params": {"velocity": 5.0}},
+            "outlet": {"type": "pressure-outlet", "params": {"pressure": 0.0}},
+        },
+        "fields": [
+            {
+                "name": "Pressure",
+                "location": "cell",
+                "type": "scalar",
+                "units": "Pa",
+            },
+            {"name": "Velocity", "location": "cell", "type": "vector", "units": "m/s"},
+        ],
+        "solver_settings": {"steady": True},
+        "mrf": [
+            {
+                "name": "rotor",
+                "region": "fluid",
+                "type": "rotating",
+                "axis": "0 0 1",
+                "origin": "0 0 0",
+                "omega": 157.08,
+                "units": "rad/s",
+            }
+        ],
+        "periodic": [
+            {
+                "name": "per-1",
+                "region": "side-a",
+                "shadow": "side-b",
+                "type": "rotational",
+                "axis": "0 0 1",
+                "angle": 60,
+            }
+        ],
+    }
+    model = build_model(mesh, regions)
+    writer = CcmMeshWriter(ccmio, out, verbose=False)
+    writer.write(model, mesh["link_data"])
+    ccmio.compress(out)
+    return regions
+
+
+def test_bc_keys_index() -> None:
+    """BC param names are indexed so they can be discovered again (B1)."""
+    ccmio = _require_ccmio()
+    with tempfile.TemporaryDirectory(prefix="gph2ccm_bck_") as tmp:
+        out = Path(tmp) / "bckeys.ccm"
+        _write_full_metadata_case(ccmio, out)
+
+        root = ccmio.open_file_readonly(str(out))
+        try:
+            _state, problem = ccmio.get_state(root)
+            inlet = ccmio.get_entity(problem, K_CCMIO_BOUNDARY_REGION, 1)
+            keys = ccmio.read_optstr(inlet, "gph2ccm.BCKeys")
+            assert keys == "velocity", keys
+            assert ccmio.read_optstr(inlet, "gph2ccm.BC.velocity") == "5.0"
+        finally:
+            ccmio.close_file(root)
+    print("test_bc_keys_index OK")
+
+
+def test_inspect_roundtrip() -> None:
+    """inspect read-back equals what was written (write -> read -> compare)."""
+    from gph2ccm.inspect import read_metadata
+
+    ccmio = _require_ccmio()
+    with tempfile.TemporaryDirectory(prefix="gph2ccm_insp_") as tmp:
+        out = Path(tmp) / "meta.ccm"
+        regions = _write_full_metadata_case(ccmio, out)
+        meta = read_metadata(out, ccmio=ccmio)
+
+    assert [f["name"] for f in meta["fields"]] == ["Pressure", "Velocity"]
+    assert meta["fields"][0]["location"] == "cell"
+    assert meta["fields"][0]["type"] == "scalar"
+    assert meta["fields"][0]["units"] == "Pa"
+    assert meta["solver_settings"] == {"steady": "True"}
+    assert meta["mrf"][0]["name"] == "rotor"
+    assert meta["mrf"][0]["omega"] == "157.08"
+    assert meta["mrf"][0]["axis"] == "0 0 1"
+    assert meta["periodic"][0]["name"] == "per-1"
+    assert meta["periodic"][0]["shadow"] == "side-b"
+    assert meta["periodic"][0]["angle"] == "60"
+
+    labels = {bc["label"]: bc for bc in meta["boundary_conditions"]}
+    assert labels["inlet"]["params"] == {"velocity": "5.0"}
+    assert labels["outlet"]["params"] == {"pressure": "0.0"}
+    # BoundaryType is normalised by _normalize_bctype: the user's hint
+    # "velocity-inlet" becomes the CCM type "inlet".
+    assert labels["inlet"]["type"] == "inlet"
+    assert labels["outlet"]["type"] == "outlet"
+
+    # Capability / quality notes are always written.
+    assert meta["notes"]["Processors"] == "1"
+    assert meta["notes"]["Dimension"] in ("2D", "3D")
+    assert set(meta["quality"]) == {"Summary", "Uncovered", "Degenerate", "Issues"}
+    assert regions["fluid_regions"] == ["fluid"]
+    print("test_inspect_roundtrip OK")
+
+
+def test_inspect_report_checklist() -> None:
+    """The human report mirrors the README post-import checklist."""
+    from gph2ccm.inspect import format_report, read_metadata
+
+    ccmio = _require_ccmio()
+    with tempfile.TemporaryDirectory(prefix="gph2ccm_rep_") as tmp:
+        out = Path(tmp) / "report.ccm"
+        _write_full_metadata_case(ccmio, out)
+        report = format_report(read_metadata(out, ccmio=ccmio))
+
+    assert "场变量" in report
+    assert "MRF 旋转参考系" in report
+    assert "周期 / 滑移配对" in report
+    assert "边界区域" in report
+    assert "网格质量" in report
+    assert "[ ] 材料与物理模型" in report
+    assert "[ ] MRF 旋转区域与参考坐标系" in report
+
+    # An old / metadata-less file still produces the checklist, not a crash.
+    bare = format_report({"file": "old.ccm"})
+    assert "不含 gph2ccm.* 描述性元数据" in bare
+    assert "[ ] 材料与物理模型" in bare
+    print("test_inspect_report_checklist OK")
+
+
 TESTS = [
     test_write_and_readback,
     test_model_build_parts_and_boundaries,
@@ -999,6 +1132,9 @@ TESTS = [
     test_regions_schema_reports_errors,
     test_regions_schema_line_numbers,
     test_regions_schema_node_name_limit,
+    test_bc_keys_index,
+    test_inspect_roundtrip,
+    test_inspect_report_checklist,
 ]
 
 

@@ -765,8 +765,15 @@ class CcmMeshWriter:
             # Optional, user-supplied structured-BC metadata (descriptive
             # only -- gph2ccm never auto-applies a solver condition).  Namespaced
             # under "gph2ccm.BC." so it cannot collide with native CCM keys.
+            bc_keys: list[str] = []
             for k, v in region.params.items():
                 self.ccmio.write_optstr(node, f"gph2ccm.BC.{k}", str(v))
+                bc_keys.append(str(k))
+            if bc_keys:
+                # The public CCMIO API cannot enumerate child nodes, so the
+                # param names are indexed here -- otherwise `gph2ccm inspect`
+                # (B1) could never discover them again.
+                self.ccmio.write_optstr(node, "gph2ccm.BCKeys", ",".join(bc_keys))
 
         # -- descriptive field / solver metadata (optional, data-driven) ------
         # Carries the user's field/solver intent from the regions JSON into the
