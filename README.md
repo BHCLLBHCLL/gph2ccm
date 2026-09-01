@@ -99,8 +99,10 @@ python -m gph2ccm mesh.gph out.ccm --regions mesh.json
   修复后 330 万单元 / 1044 万面网格可正常导入。
 - **定位是「网格 + 描述」导出器，不是求解就绪导出器**：上游 GPH 只有几何
   与拓扑，没有结果场、材料属性、湍流/能量等物理模型。因此场变量、求解
-  设置、MRF、周期/滑移配对等信息只以 `gph2ccm.*` 描述性元数据节点写入
-  CCM（见下节），**不会**自动变成 STAR-CCM+ 里生效的物理条件。
+  设置、MRF、周期/滑移配对等信息默认以 `gph2ccm.*` 描述性元数据节点写入
+  CCM（见下节），**不会**自动变成 STAR-CCM+ 里生效的物理条件。例外：
+  regions JSON 里的 `periodic` 配对（见下）会做几何匹配校验并写成生效的
+  `InterfaceDefinitions` 节点（C1）。
 - **单 processor**：只写单一 processor（单分区）网格，不做分区/并行分解。
 - **不修网格**：只做只读质量诊断（`gph2ccm/diagnose.py`），不自动修复退化
   面、未覆盖边界面等问题。
@@ -126,7 +128,7 @@ STAR-CCM+ 导入时会忽略它们，网格不受影响；但可以用
 | —（索引） | `gph2ccm.SolverKeys` | 逗号分隔的键名列表 |
 | `mrf` | `gph2ccm.MRF.<name>` | `<region>\|<type>\|<axis>\|<origin>\|<omega>\|<units>` |
 | —（索引） | `gph2ccm.MRFNames` | 逗号分隔的 MRF 名列表 |
-| `periodic` | `gph2ccm.Periodic.<name>` | `<region>\|<shadow>\|<type>\|<axis>\|<angle>` |
+| `periodic` | `gph2ccm.Periodic.<name>` | `<region>\|<shadow>\|<type>\|<axis>\|<angle>`；**且**几何匹配时额外写生效的 `InterfaceDefinitions` 节点（C1） |
 | —（索引） | `gph2ccm.PeriodicNames` | 逗号分隔的周期对名列表 |
 | 边界区域 `params` | 每个边界区域上的 `gph2ccm.BC.<k>` | 结构化的边界条件描述（仅类型与参数名，不含数值场） |
 | —（索引） | 同区域上的 `gph2ccm.BCKeys` | 逗号分隔的参数名列表（公开 CCMIO API 无法枚举子节点，故建索引） |
@@ -215,8 +217,12 @@ CCM 导入 STAR-CCM+ 后，下面这些**必须**人工补齐（转换器不会�
 - [ ] **MRF 旋转条件**：`gph2ccm.MRF.*` 给出区域名、转轴、原点、角速度，
       但实际的 `Moving Reference Frame`（旋转区域、参考坐标系）要在
       STAR-CCM+ 里手动建立并指派到对应 region。（项 #3）
-- [ ] **周期/滑移配对**：`gph2ccm.Periodic.*` 给出主/影子区域与转轴/角度，
-      实际的 `Periodic Interface` / 滑移网格配对仍需手工创建。（项 #4）
+- [ ] **周期/滑移配对**：`gph2ccm.Periodic.*` 给出主/影子区域与转轴/角度。
+      若 regions JSON 的 `periodic` 条目引用的两个边界区域都存在且几何匹配
+      （面数一致；平移型要求顶点在平移向量下逐点重合，旋转型要求刚体全等），
+      转换器会额外写入生效的 `InterfaceDefinitions` 节点（
+      `ConditionType=PeriodicInterface`），STAR-CCM+ 导入时可直接建周期
+      interface；几何不匹配则转换直接报错（fail-fast），防止生成坏配对。
 - [ ] **交界面**：`--split-fluid-regions` 只写网格与
       `InterfaceDefinitions`（`IN_PLACE` / `InternalInterface`），
       STAR-CCM+ 通常会自动识别；若不识别，需手动创建 interface 并把两侧

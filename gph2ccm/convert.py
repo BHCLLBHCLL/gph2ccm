@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import time
 from pathlib import Path
@@ -209,6 +210,140 @@ def _short_label(label: str) -> str:
     return s[:16]
 
 
+# ---------------------------------------------------------------------------
+# C1: periodic / sliding pairings -- geometry validation & effective write.
+# ---------------------------------------------------------------------------
+
+
+def _find_boundary_region(
+    regions: list["BoundaryRegion"], label: str
+) -> Optional["BoundaryRegion"]:
+    """Locate a boundary region by exact or dotted-suffix label match."""
+    for r in regions:
+        if r.label == label:
+            return r
+        if label.endswith("." + r.label) or r.label.endswith("." + label):
+            return r
+    return None
+
+
+def _parse_vec3(text: str) -> Optional[np.ndarray]:
+    """Parse ``"0 0 1"`` / ``"0,0,1"`` into a length-3 float array."""
+    if not text:
+        return None
+    parts = [p for p in re.split(r"[,\s;]+", str(text).strip()) if p]
+    if len(parts) != 3:
+        return None
+    try:
+        return np.asarray([float(p) for p in parts], dtype=np.float64)
+    except ValueError:
+        return None
+
+
+def _face_unique_vertices(ld: dict, face_ids, vertices: np.ndarray) -> np.ndarray:
+    """Unique vertex coordinates (rounded, deduplicated) of a face subset."""
+    fids = np.asarray(face_ids, dtype=np.int64)
+    if fids.size == 0:
+        return np.empty((0, 3))
+    npe = np.asarray(ld["npe"], dtype=np.int64)[fids]
+    offs = np.asarray(ld["face_offsets"], dtype=np.int64)[fids]
+    fn = np.asarray(ld["face_nodes"], dtype=np.int64)
+    vids = np.concatenate([fn[o : o + n] for o, n in zip(offs, npe)])
+    return np.unique(np.round(vertices[vids] * 1e6) / 1e6, axis=0)
+
+
+def _sets_match_translate(va: np.ndarray, vb: np.ndarray, vec: np.ndarray,
+                          tol: float = 1e-4) -> bool:
+    """Multiset equality of ``va + vec`` vs ``vb`` up to rounding tolerance."""
+    moved = np.round((va + vec) / tol)
+    target = np.round(vb / tol)
+    ua, ca = np.unique(moved, axis=0, return_counts=True)
+    ub, cb = np.unique(target, axis=0, return_counts=True)
+    return (
+        ua.shape == ub.shape
+        and np.array_equal(ua, ub)
+        and np.array_equal(ca, cb)
+    )
+
+
+def _sets_congruent(va: np.ndarray, vb: np.ndarray, tol: float = 1e-4) -> bool:
+    """Rigid-motion congruence (necessary condition) of two point sets.
+
+    Uses the multiset of all pairwise distances, which is invariant under
+    every rigid motion (rotation about any axis, translation).  O(n^2); the
+    caller caps the vertex count to keep large periodic faces cheap.
+    """
+    if va.shape[0] != vb.shape[0]:
+        return False
+
+    def _dist_multiset(pts: np.ndarray) -> np.ndarray:
+        d = np.linalg.norm(pts[:, None, :] - pts[None, :, :], axis=2)
+        iu = np.triu_indices(pts.shape[0], k=1)
+        return np.sort(np.round(d[iu] / tol))
+
+    try:
+        return np.array_equal(_dist_multiset(va), _dist_multiset(vb))
+    except MemoryError:
+        return True  # too big to check cheaply -- rely on counts
+
+
+_MAX_DISTANCE_CHECK_VERTS = 600
+
+
+def periodic_pair_errors(model: "CcmModel", ld: dict) -> list[str]:
+    """Validate every periodic pair that references *existing* regions.
+
+    Returns a list of human-readable problems (empty = all checked pairs
+    pass).  Pairs whose region/shadow does not exist in the mesh are skipped
+    here -- the caller treats them as a warning and keeps the pairing
+    descriptive only.  Pairs that reference real regions must satisfy:
+
+    * equal face counts;
+    * congruent vertex geometry -- exact under the documented translation
+      vector (translational type), or rigid-motion congruence (rotational
+      type, checked via the pairwise-distance multiset up to a size cap).
+    """
+    errors: list[str] = []
+    for p in model.periodic or []:
+        if not isinstance(p, dict):
+            continue
+        name = p.get("name") or "?"
+        region = p.get("region") or ""
+        shadow = p.get("shadow") or ""
+        ra = _find_boundary_region(model.boundary_regions, region)
+        rb = _find_boundary_region(model.boundary_regions, shadow)
+        if ra is None or rb is None:
+            continue  # caller warns; keep descriptive
+        if ra.face_ids.size != rb.face_ids.size:
+            errors.append(
+                f"{name}: '{region}' has {ra.face_ids.size} faces but "
+                f"'{shadow}' has {rb.face_ids.size}"
+            )
+            continue
+        va = _face_unique_vertices(ld, ra.face_ids, model.vertices)
+        vb = _face_unique_vertices(ld, rb.face_ids, model.vertices)
+        if va.shape[0] != vb.shape[0]:
+            errors.append(
+                f"{name}: '{region}' has {va.shape[0]} boundary vertices but "
+                f"'{shadow}' has {vb.shape[0]}"
+            )
+            continue
+        ptype = str(p.get("type") or "rotational").lower()
+        vec = _parse_vec3(p.get("translation") or p.get("angle") or "")
+        if ptype == "translational" and vec is not None:
+            if not _sets_match_translate(va, vb, vec):
+                errors.append(
+                    f"{name}: '{region}' and '{shadow}' do not match under "
+                    f"translation ({vec[0]:g} {vec[1]:g} {vec[2]:g})"
+                )
+        elif va.shape[0] <= _MAX_DISTANCE_CHECK_VERTS and not _sets_congruent(va, vb):
+            errors.append(
+                f"{name}: '{region}' and '{shadow}' are not congruent "
+                f"(rigid-motion check failed)"
+            )
+    return errors
+
+
 class CcmMeshWriter:
     """Write a :class:`CcmModel` to a legacy ``.ccm`` file via CCMIO."""
 
@@ -401,17 +536,50 @@ class CcmMeshWriter:
 
             records.append((f"Interface {k}", b0, b1))
 
-        self._write_interface_definitions(root, records)
+        self._write_interface_definitions(root, records, model)
 
-    def _write_interface_definitions(self, root, records) -> None:
+    def _write_interface_definitions(self, root, records, model) -> None:
         """Write the STAR-CCM+ ``InterfaceDefinitions`` node (root child).
 
         Mirrors the structure written by STAR-CCM+ itself (see
         ``bladerotating_dm2.ccm``): one ``Interface-N`` node per interface
         with ``Name``, ``Boundary0``/``Boundary1`` (boundary-region ids of
         the two per-side patches), ``Configuration`` and ``ConditionType``.
+
+        *records* are the split-mode grid interfaces (written as
+        ``InternalInterface``); user-declared ``model.periodic`` pairings that
+        reference existing boundary regions are appended as
+        ``PeriodicInterface`` (C1 -- effective, not just descriptive).
         """
-        if not records:
+        # -- user-declared periodic pairings ------------------------------
+        periodic_pairs: list[tuple[str, int, int]] = []
+        for p in model.periodic or []:
+            if not isinstance(p, dict):
+                continue
+            name = p.get("name")
+            if not name:
+                continue
+            ra = _find_boundary_region(
+                model.boundary_regions, p.get("region") or ""
+            )
+            rb = _find_boundary_region(
+                model.boundary_regions, p.get("shadow") or ""
+            )
+            if ra is None or rb is None:
+                self._log(
+                    f"[gph2ccm]   periodic '{name}': boundary region "
+                    f"'{p.get('region')}'/'{p.get('shadow')}' not found -- "
+                    f"keeping the pairing descriptive only"
+                )
+                continue
+            periodic_pairs.append((str(name), ra.id, rb.id))
+            self._log(
+                f"[gph2ccm]   periodic '{name}': writing effective interface "
+                f"between regions {ra.id} ('{ra.label}') and "
+                f"{rb.id} ('{rb.label}')"
+            )
+
+        if not records and not periodic_pairs:
             return
         idf = self.ccmio.create_node(
             root.node, "InterfaceDefinitions", "InterfaceDefinitions"
@@ -424,6 +592,15 @@ class CcmMeshWriter:
             self.ccmio.write_nodestr(iface, "Configuration", "IN_PLACE")
             self.ccmio.write_nodestr(
                 iface, "ConditionType", "InternalInterface"
+            )
+        for k, (name, b0, b1) in enumerate(periodic_pairs, start=len(records)):
+            iface = self.ccmio.create_node(idf, f"Interface-{k}", "Interface")
+            self.ccmio.write_nodestr(iface, "Name", name)
+            self.ccmio.write_nodei(iface, "Boundary0", b0)
+            self.ccmio.write_nodei(iface, "Boundary1", b1)
+            self.ccmio.write_nodestr(iface, "Configuration", "IN_PLACE")
+            self.ccmio.write_nodestr(
+                iface, "ConditionType", "PeriodicInterface"
             )
 
     def _write_metadata_nodes(self, problem, model: CcmModel) -> None:
@@ -621,6 +798,17 @@ class CcmMeshWriter:
         ccmio = self.ccmio
         out = self.out_path
 
+        # C1: periodic pairings become *effective* only when their geometry
+        # actually matches -- a declared pair that cannot hold is an error
+        # (fail fast, before any output exists), never a silent bad write.
+        if model.periodic:
+            problems = periodic_pair_errors(model, ld)
+            if problems:
+                raise ValueError(
+                    "periodic pairings fail geometry validation:\n  - "
+                    + "\n  - ".join(problems)
+                )
+
         if out.exists():
             if self.verbose:
                 print(f"[gph2ccm] removing existing output: {out}")
@@ -791,6 +979,10 @@ class CcmMeshWriter:
 
         if self.split_regions:
             self._write_interfaces(root, topology, problem, model, ld)
+        elif model.periodic:
+            # Periodic pairings are independent of split mode: they join two
+            # existing boundary regions, so write them whenever declared.
+            self._write_interface_definitions(root, [], model)
 
         # -- problem description -------------------------------------------
         self._log("[gph2ccm] writing problem description ...")

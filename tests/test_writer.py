@@ -1234,6 +1234,227 @@ def test_macro_generation() -> None:
     print("test_macro_generation OK")
 
 
+# -- C1: periodic pairings become effective -----------------------------------
+
+def _periodic_fixture_model():
+    """A hand-built model with three boundary faces for geometry checks.
+
+    Face 0 = unit square at z=0; face 1 = same square at z=1 (congruent
+    under translation (0,0,1)); face 2 = 2x1 rectangle at z=2 (congruent
+    to neither).
+    """
+    from gph2ccm.convert import periodic_pair_errors
+    from gph2ccm.model import BoundaryRegion, CellType, CcmModel
+
+    vertices = np.array(
+        [
+            [0, 0, 0], [1, 0, 0], [1, 1, 0], [0, 1, 0],  # face 0 (z=0)
+            [0, 0, 1], [1, 0, 1], [1, 1, 1], [0, 1, 1],  # face 1 (z=1)
+            [0, 0, 2], [2, 0, 2], [2, 1, 2], [0, 1, 2],  # face 2 (2x1 rect)
+        ],
+        dtype=float,
+    )
+    ld = {
+        "n_faces": 3,
+        "npe": np.array([4, 4, 4], dtype=np.int64),
+        "face_offsets": np.array([0, 4, 8, 12], dtype=np.int64),
+        "face_nodes": np.array(
+            [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11], dtype=np.int64
+        ),
+        "owner": np.zeros(3, dtype=np.int64),
+        "neighbor": np.full(3, -1, dtype=np.int64),
+    }
+    model = CcmModel(
+        vertices=vertices,
+        cell_types=np.array([1], dtype=np.int32),
+        cell_table=[CellType(id=1, label="fluid", material="fluid")],
+        boundary_regions=[
+            BoundaryRegion(1, "side-a", "wall", np.array([0])),
+            BoundaryRegion(2, "side-b", "wall", np.array([1])),
+            BoundaryRegion(3, "side-c", "wall", np.array([2])),
+        ],
+        n_faces=3,
+    )
+    return model, ld, periodic_pair_errors
+
+
+def test_periodic_geometry_validation() -> None:
+    """periodic_pair_errors accepts matching pairs and rejects bad ones."""
+    model, ld, check = _periodic_fixture_model()
+
+    # Translational pair with the exact vector -> OK.
+    model.periodic = [
+        {
+            "name": "per-ok",
+            "region": "side-a",
+            "shadow": "side-b",
+            "type": "translational",
+            "translation": "0 0 1",
+        }
+    ]
+    assert check(model, ld) == []
+
+    # Wrong translation vector -> geometry error.
+    model.periodic[0]["translation"] = "0 0 2"
+    errs = check(model, ld)
+    assert len(errs) == 1 and "do not match under translation" in errs[0]
+
+    # Rotational type against a non-congruent face -> geometry error.
+    model.periodic = [
+        {
+            "name": "per-rot",
+            "region": "side-a",
+            "shadow": "side-c",
+            "type": "rotational",
+            "axis": "0 0 1",
+            "angle": 90,
+        }
+    ]
+    errs = check(model, ld)
+    assert len(errs) == 1 and "not congruent" in errs[0]
+
+    # Congruent rotational pair passes the (necessary) rigid-motion check.
+    model.periodic[0]["shadow"] = "side-b"
+    assert check(model, ld) == []
+
+    # Unequal face counts -> error even if geometry would match.
+    model.periodic = [
+        {
+            "name": "per-cnt",
+            "region": "side-a",
+            "shadow": "side-b",
+            "type": "translational",
+            "translation": "0 0 1",
+        }
+    ]
+    model.boundary_regions[1].face_ids = np.array([1, 2], dtype=np.int64)
+    errs = check(model, ld)
+    assert len(errs) == 1 and "faces but" in errs[0]
+
+    # Missing region -> skipped (caller warns, keeps descriptive only).
+    model.boundary_regions[1].face_ids = np.array([1], dtype=np.int64)
+    model.periodic[0]["shadow"] = "does-not-exist"
+    assert check(model, ld) == []
+    print("test_periodic_geometry_validation OK")
+
+
+def _periodic_cube_mesh():
+    """A 1-cell cube whose bottom face (side-a) is a translation of its top
+    face (side-b) by (0,0,1) -- a well-formed mesh for periodic writes."""
+    vertices = np.array(
+        [
+            [0, 0, 0], [1, 0, 0], [1, 1, 0], [0, 1, 0],  # z=0 (bottom)
+            [0, 0, 1], [1, 0, 1], [1, 1, 1], [0, 1, 1],  # z=1 (top)
+        ],
+        dtype=float,
+    )
+    faces = [
+        [0, 1, 2, 3],  # 0: z=0 -> side-a
+        [4, 5, 6, 7],  # 1: z=1 -> side-b (translated +z)
+        [0, 1, 5, 4],  # 2: y=0
+        [1, 2, 6, 5],  # 3: x=1
+        [2, 3, 7, 6],  # 4: y=1
+        [3, 0, 4, 7],  # 5: x=0
+    ]
+    npe = np.full(6, 4, dtype=np.int64)
+    return {
+        "vertices": vertices,
+        "n_vertices": 8,
+        "link_data": {
+            "n_faces": 6,
+            "n_cells": 1,
+            "npe": npe,
+            "face_nodes": np.asarray([n for f in faces for n in f], dtype=np.int64),
+            "face_offsets": np.concatenate([[0], np.cumsum(npe)]),
+            "owner": np.zeros(6, dtype=np.int64),
+            "neighbor": np.full(6, -1, dtype=np.int64),
+            "boundary_faces": list(range(6)),
+        },
+        "cvol_id": np.ones(1, dtype=np.int64),
+        "parts_with_cvol": [("fluid", 1)],
+        "volume_regions": ["FluidRegion"],
+        "surface_regions": [
+            ("side-a", np.array([0], dtype=np.int64)),
+            ("side-b", np.array([1], dtype=np.int64)),
+        ],
+    }
+
+
+def test_periodic_interface_written() -> None:
+    """A declared pair is written as an effective PeriodicInterface (C1)."""
+    from gph2ccm.convert import CcmMeshWriter
+    from gph2ccm.model import build_model
+
+    mesh = _periodic_cube_mesh()
+    regions = {
+        "periodic": [
+            {
+                "name": "per-1",
+                "region": "side-a",
+                "shadow": "side-b",
+                "type": "translational",
+                "translation": "0 0 1",
+            }
+        ]
+    }
+    model = build_model(mesh, regions)
+
+    ccmio = _require_ccmio()
+    with tempfile.TemporaryDirectory(prefix="gph2ccm_per_") as tmp:
+        out = Path(tmp) / "periodic.ccm"
+        writer = CcmMeshWriter(ccmio, out, verbose=False)
+        writer.write(model, mesh["link_data"])
+        # Do not compress: keep the node strings greppable for a second,
+        # independent assertion of the effective write.
+        raw = out.read_bytes()
+        assert b"InterfaceDefinitions" in raw
+        assert b"PeriodicInterface" in raw
+
+        records = _read_interface_definitions(ccmio, out)
+        assert len(records) == 1
+        rec = records[0]
+        assert rec["name"] == "per-1"
+        assert rec["boundary0"] >= 0 and rec["boundary1"] >= 0
+        assert rec["boundary0"] != rec["boundary1"]
+        assert rec["configuration"] == "IN_PLACE"
+        assert rec["condition_type"] == "PeriodicInterface"
+    print("test_periodic_interface_written OK")
+
+
+def test_periodic_geometry_rejects_write() -> None:
+    """A declared pair whose geometry does not match fails the conversion."""
+    from gph2ccm.convert import CcmMeshWriter
+    from gph2ccm.model import build_model
+
+    mesh = _periodic_cube_mesh()
+    regions = {
+        "periodic": [
+            {
+                "name": "per-bad",
+                "region": "side-a",
+                "shadow": "side-b",
+                "type": "translational",
+                "translation": "9 9 9",  # wrong: bottom/top are 1 unit apart
+            }
+        ]
+    }
+    model = build_model(mesh, regions)
+
+    ccmio = _require_ccmio()
+    with tempfile.TemporaryDirectory(prefix="gph2ccm_perbad_") as tmp:
+        out = Path(tmp) / "bad.ccm"
+        writer = CcmMeshWriter(ccmio, out, verbose=False)
+        try:
+            writer.write(model, mesh["link_data"])
+        except ValueError as exc:
+            assert "periodic pairings fail geometry validation" in str(exc)
+            assert "do not match under translation" in str(exc)
+        else:
+            raise AssertionError("write should have rejected the bad pair")
+        assert not out.exists()  # fail-fast before any output
+    print("test_periodic_geometry_rejects_write OK")
+
+
 TESTS = [
     test_write_and_readback,
     test_model_build_parts_and_boundaries,
@@ -1259,6 +1480,9 @@ TESTS = [
     test_inspect_report_checklist,
     test_cell_centroids_area_weighted,
     test_macro_generation,
+    test_periodic_geometry_validation,
+    test_periodic_interface_written,
+    test_periodic_geometry_rejects_write,
 ]
 
 

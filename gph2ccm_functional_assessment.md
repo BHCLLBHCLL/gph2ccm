@@ -41,7 +41,7 @@
 | 3 | Internal Faces（owner/neigh） | ✅ | 2D 数组成块 bug 已规避（330 万单元验证） |
 | 4 | Boundary Faces + Regions | ✅ | 重叠区域去重 + Default_Boundary_Region |
 | 5 | CellTopologyType 显式写 | ✅ | poly=255，避免导入逐个判定 |
-| 6 | BoundaryType | ⚠️ | 启发式 / JSON 覆盖类型名，但**无对称 / 周期 / 旋转的附加定义** |
+| 6 | BoundaryType | ✅ | 启发式 / JSON 覆盖类型名；周期配对经几何校验后写生效的 `InterfaceDefinitions`（`PeriodicInterface`，C1） |
 | 7 | Region Cell Maps（split 模式） | ✅ | 每 region 一个 `Region Cell Map <label>` |
 | 8 | Grid Interface（split 模式） | ✅ | 两侧边界 patch + `[Interface N]` + `InterfaceDefinitions` |
 | 9 | CCMIOCompress | ✅ | 写出后压缩 |
@@ -49,7 +49,7 @@
 | 11 | Verify 读回校验 | ✅ | H1 已修复：split 模式 interface 两侧共享面不再误报（relaxed 校验） |
 | 12 | Multiple Processors（分布式） | ❌ | 单 processor（legacy CCM 固有限制）；已写入 `gph2ccm.Note.Processors`/`MultiProcessor` 自说明元数据 + 大网格告警 |
 | 13 | Solution Fields（结果场） | ⚠️ | 不写实际场数据；可经 `regions["fields"]` 写入 `gph2ccm.Field.*` **描述性**场定义 |
-| 14 | Boundary Conditions（含对称 / 周期配对） | ⚠️ | 结构化类型规范化 + `gph2ccm.BC.*` 描述性参数（`regions` JSON 驱动），仍非求解就绪 |
+| 14 | Boundary Conditions（含对称 / 周期配对） | ⚠️ | 结构化类型规范化 + `gph2ccm.BC.*` 描述性参数（`regions` JSON 驱动）；**周期配对已生效**（C1），其余仍非求解就绪 |
 | 15 | Material / Region 求解属性 | ⚠️ | 新增 `gph2ccm.Solver.*` 描述性求解设置元数据（`regions` JSON 驱动），仍非实际属性 |
 | 16 | MRF（旋转参考系） | ⚠️ | 不自动施加旋转条件；可经 `regions["mrf"]` 写入 `gph2ccm.MRF.*` **描述性**旋转参考系声明 |
 | 17 | Periodic / Cyclic 配对 | ⚠️ | 不生成几何配对界面；可经 `regions["periodic"]` 写入 `gph2ccm.Periodic.*` **描述性**配对声明 |
@@ -123,12 +123,15 @@ Configuration=IN_PLACE / ConditionType=InternalInterface）、两侧带单元数
 
 ## 5. 关键缺口（按影响排序）
 
-> 执行进度（对应原始 8 项清单）：**#8 测试 ✅、#2 边界条件结构化 ✅、#1 结果场/求解设置 ⚠️、#3 MRF ⚠️、#4 周期/滑移配对 ⚠️、#5 多 processor ⚠️、#6 2D 包裹 ⚠️、#7 质量诊断 ⚠️ —— 全部完成（物理/求解层均为描述性/诊断性，非求解就绪）**。
+> 执行进度（对应原始 8 项清单）：**#8 测试 ✅、#2 边界条件结构化 ✅、#1 结果场/求解设置 ⚠️、#3 MRF ⚠️、#4 周期/滑移配对 ✅（C1 已生效，描述性节点保留）、#5 多 processor ⚠️、#6 2D 包裹 ⚠️、#7 质量诊断 ⚠️ —— 除周期配对外，物理/求解层均为描述性/诊断性，非求解就绪**。
 
 1. **无结果场 / 求解设置** —— ⚠️ 已有描述性载体：经 `regions["fields"]` / `regions["solver_settings"]` 写入 `gph2ccm.Field.*` / `gph2ccm.Solver.*` 命名空间节点；**非实际场数据、不求解**（"keep boundary" 范围）。
 2. **边界条件仅类型名** —— ⚠️ 已结构化：`boundary_conditions` 经 `_normalize_bctype` 规范化类型 + `gph2ccm.BC.*` 描述性参数（regions JSON 驱动），仍非求解就绪。
 3. **MRF 仅 region 划分** —— ⚠️ 已有描述性旋转参考系声明：经 `regions["mrf"]` 写入 `gph2ccm.MRF.*`（region/type/axis/origin/omega/units），**非真实旋转条件**。
-4. **周期 / 滑移界面配对** —— ⚠️ 已有描述性配对声明：经 `regions["periodic"]` 写入 `gph2ccm.Periodic.*`（region/shadow/type/axis/angle），**未生成几何配对界面**。
+4. **周期 / 滑移界面配对** —— ✅ 从「描述」升级为「生效」：`regions["periodic"]`
+   经几何匹配校验（面数一致；平移型逐点重合、旋转型刚体全等）后，额外写入
+   `InterfaceDefinitions` 节点（`ConditionType=PeriodicInterface`）；几何不匹配
+   则转换报错 fail-fast。`gph2ccm.Periodic.*` 描述性节点仍保留（C1）。
 5. **多 processor / 分布式** —— ⚠️ 已自说明：legacy CCM 单 processor 固有限制，写入 `gph2ccm.Note.Processors`/`MultiProcessor` 元数据 + 大网格（>200 万 cell）告警；**无分布式分区写入**。
 6. **2D 网格包裹** —— ⚠️ 已检测并自说明：识别 collapsed-axis 的 2D 网格，写入 `gph2ccm.Note.Dimension`/`TwoDWrapping` 元数据；**不挤出壳层**（超出 keep-boundary 范围）。
 7. **网格质量修复** —— ⚠️ 已内嵌导出期质量摘要（`gph2ccm.Qual.*`：未覆盖/退化面计数）+ `diagnose_quality` API；**仍不修改网格**（keep-boundary 范围；重检查见 `tools/topo_check.py`）。
@@ -168,7 +171,7 @@ README 的「导入后补充清单」只能靠手工对照。
 
 | # | 任务 | 前置条件 | 说明 |
 |---|---|---|---|
-| C1 | `PeriodicBoundaries` / `Interfaces` 节点写入（周期配对从「描述」变「生效」） | 周期对几何匹配算法（主/影子面按转角/平移配对）；样本 `bladerotating_dm2.ccm` 已在手 | 矩阵 #6/#17，对叶轮机械用户价值最高 |
+| C1 ✅ | `PeriodicBoundaries` / `Interfaces` 节点写入（周期配对从「描述」变「生效」） | 周期对几何匹配算法（主/影子面按转角/平移配对）；样本 `bladerotating_dm2.ccm` 已在手 | 矩阵 #6/#17，对叶轮机械用户价值最高 |
 | C2 | 初始场写入（`FieldSet` / `Field` / `FieldData`） | **先确认 GPH 侧有无场数据**——GPH 网格文件本身无场，需 FLDUTIL 结果文件，可能超出可行范围 | 矩阵 #13/#19；若上游无数据则永久停留在描述层 |
 | C3 | 多 processor 写入 | 先确认 `ccmio.dll` 2D 分块 bug 是否仅限 chunked 路径；或绕过为「每 processor 单文件」 | 矩阵 #12；价值取决于 STAR-CCM+ 导入侧是否真需要 |
 
