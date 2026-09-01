@@ -35,9 +35,11 @@ NOTE_NODES = (
 )
 QUALITY_NODES = (
     "gph2ccm.Qual.Summary",
+    "gph2ccm.Qual.Severity",
     "gph2ccm.Qual.Uncovered",
     "gph2ccm.Qual.Degenerate",
     "gph2ccm.Qual.Issues",
+    "gph2ccm.Qual.Hints",
 )
 
 #: ``index node -> (value prefix, result key)`` for the indexed groups.
@@ -179,6 +181,11 @@ def format_report(meta: dict) -> str:
     if quality:
         add("网格质量（只读诊断，导出器不修网格）")
         lines.extend(_fmt_table([(k, v) for k, v in quality.items()]))
+        # Fix hints on their own lines -- they can be long.
+        for k, v in quality.items():
+            if k == "Hints" and v:
+                for hint in v.split(" | "):
+                    add(f"    -> {hint}")
         add("")
 
     # -- regions / BCs ----------------------------------------------------

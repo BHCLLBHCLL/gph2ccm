@@ -802,7 +802,7 @@ def test_dimension_note() -> None:
 
 def test_diagnose_quality_unit() -> None:
     """diagnose_quality reports cheap metrics without touching the mesh."""
-    from gph2ccm.diagnose import diagnose_quality
+    from gph2ccm.diagnose import diagnose_quality, format_findings
 
     mesh = make_synthetic_gph()
     model = build_model(mesh, {"fluid_regions": ["fluid"]})
@@ -815,6 +815,16 @@ def test_diagnose_quality_unit() -> None:
     assert q["n_degenerate_boundary"] == 0
     assert q["ok"] is False  # because 12 faces are uncovered
     assert any("Default_Boundary_Region" in i for i in q["issues"])
+    # B4: graded findings with fix hints; ``issues`` stays plain.
+    assert q["has_errors"] is False  # uncovered faces are a warning, not an error
+    findings = q["findings"]
+    assert len(findings) == 1
+    assert findings[0]["severity"] == "warning"
+    assert findings[0]["message"] == q["issues"][0]
+    assert "Default_Boundary_Region" in findings[0]["hint"]
+    graded = format_findings(q)
+    assert graded[0].startswith("[WARNING] ")
+    assert "-> " in graded[1]
     # The mesh is not modified by diagnostics.
     assert model.default_face_ids.size == 12
     print("test_diagnose_quality_unit OK")
@@ -849,6 +859,10 @@ def test_quality_note() -> None:
             assert "Default_Boundary_Region" in ccmio.read_optstr(
                 problem, "gph2ccm.Qual.Issues"
             )
+            # B4: graded severity + fix hints ride along.
+            assert ccmio.read_optstr(problem, "gph2ccm.Qual.Severity") == "warning"
+            hints = ccmio.read_optstr(problem, "gph2ccm.Qual.Hints")
+            assert "Default_Boundary_Region" in hints or "STAR-CCM+" in hints
         finally:
             ccmio.close_file(root)
     print("test_quality_note OK")
@@ -1082,7 +1096,14 @@ def test_inspect_roundtrip() -> None:
     # Capability / quality notes are always written.
     assert meta["notes"]["Processors"] == "1"
     assert meta["notes"]["Dimension"] in ("2D", "3D")
-    assert set(meta["quality"]) == {"Summary", "Uncovered", "Degenerate", "Issues"}
+    assert set(meta["quality"]) == {
+        "Summary",
+        "Severity",
+        "Uncovered",
+        "Degenerate",
+        "Issues",
+        "Hints",
+    }
     assert regions["fluid_regions"] == ["fluid"]
     print("test_inspect_roundtrip OK")
 

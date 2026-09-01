@@ -23,7 +23,7 @@ from .ccmio import (
     K_CCMIO_VERTICES,
 )
 from .deps import import_gph2cgns
-from .diagnose import diagnose_quality
+from .diagnose import diagnose_quality, format_findings
 from .model import (
     CcmModel,
     build_model,
@@ -546,6 +546,11 @@ class CcmMeshWriter:
         )
         self.ccmio.write_optstr(
             problem,
+            "gph2ccm.Qual.Severity",
+            "error" if q["has_errors"] else ("ok" if q["ok"] else "warning"),
+        )
+        self.ccmio.write_optstr(
+            problem,
             "gph2ccm.Qual.Uncovered",
             str(q["n_uncovered_boundary"]),
         )
@@ -558,7 +563,16 @@ class CcmMeshWriter:
             self.ccmio.write_optstr(
                 problem, "gph2ccm.Qual.Issues", " | ".join(q["issues"])
             )
+            # B4: graded findings with fix hints, written alongside the raw
+            # issues so the post-import checklist is actionable.
+            hints = [f["hint"] for f in q.get("findings", []) if f.get("hint")]
+            if hints:
+                self.ccmio.write_optstr(
+                    problem, "gph2ccm.Qual.Hints", " | ".join(hints)
+                )
             self._log("[gph2ccm] quality notes: " + " | ".join(q["issues"]))
+            for line in format_findings(q):
+                self._log("[gph2ccm]   " + line)
 
     def write(self, model: CcmModel, ld: dict) -> None:
         ccmio = self.ccmio

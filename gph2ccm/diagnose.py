@@ -17,6 +17,9 @@ import numpy as np
 
 from .model import CcmModel
 
+#: Severity levels, most severe first.
+SEVERITIES = ("error", "warning", "info")
+
 
 def diagnose_quality(model: CcmModel, ld: dict) -> dict:
     """Return cheap mesh-quality metrics without modifying the mesh.
@@ -33,8 +36,10 @@ def diagnose_quality(model: CcmModel, ld: dict) -> dict:
     dict
         Keys: ``n_vertices``, ``n_cells``, ``n_internal_faces``,
         ``n_boundary_faces``, ``n_boundary_regions``,
-        ``n_uncovered_boundary``, ``n_degenerate_boundary``, ``issues`` (list
-        of human-readable strings), ``ok`` (bool).
+        ``n_uncovered_boundary``, ``n_degenerate_boundary``,
+        ``findings`` (graded list of ``{"severity", "message", "hint"}``
+        dicts -- B4), ``issues`` (backwards-compatible plain-message list),
+        ``has_errors`` (bool: any ``error``-severity finding), ``ok`` (bool).
     """
     npe = np.asarray(ld.get("npe"), dtype=np.int64) if ld else np.empty(0, np.int64)
     boundary_face_ids = (
@@ -57,14 +62,57 @@ def diagnose_quality(model: CcmModel, ld: dict) -> dict:
         "n_degenerate_boundary": n_degenerate,
     }
 
-    issues: list[str] = []
+    # Graded findings (B4): severity + fix hint.  The hints point at the
+    # STAR-CCM+ / tooling side because gph2ccm itself never repairs meshes.
+    findings: list[dict] = []
     if metrics["n_uncovered_boundary"]:
-        issues.append(
-            f"{metrics['n_uncovered_boundary']} boundary faces not assigned to "
-            "any region (Default_Boundary_Region)"
+        findings.append(
+            {
+                "severity": "warning",
+                "message": (
+                    f"{metrics['n_uncovered_boundary']} boundary faces not assigned to "
+                    "any region (Default_Boundary_Region)"
+                ),
+                "hint": (
+                    "这些面会进入 Default_Boundary_Region，仍可导入；"
+                    "在 STAR-CCM+ 中为其指定边界类型（wall 等），"
+                    "或检查上游 LS_SurfaceRegions 是否漏配"
+                ),
+            }
         )
     if n_degenerate:
-        issues.append(f"{n_degenerate} degenerate boundary faces (npe < 3)")
-    metrics["issues"] = issues
-    metrics["ok"] = not issues
+        findings.append(
+            {
+                "severity": "error",
+                "message": f"{n_degenerate} degenerate boundary faces (npe < 3)",
+                "hint": (
+                    "退化面会阻断求解：用 tools/topo_check.py 定位具体面，"
+                    "在 STAR-CCM+ 的 Surface Repair 中修复后重新导出"
+                ),
+            }
+        )
+
+    metrics["findings"] = findings
+    # ``issues`` keeps its pre-B4 shape (plain strings) for compatibility.
+    metrics["issues"] = [f["message"] for f in findings]
+    metrics["has_errors"] = any(f["severity"] == "error" for f in findings)
+    metrics["ok"] = not findings
     return metrics
+
+
+def format_findings(diag: dict) -> list[str]:
+    """Render :func:`diagnose_quality` findings as graded, hint-carrying lines.
+
+    Output shape (one finding = two lines)::
+
+        [ERROR]   2 degenerate boundary faces (npe < 3)
+                  -> 退化面会阻断求解：...
+    """
+    lines: list[str] = []
+    for finding in diag.get("findings", []):
+        severity = finding.get("severity", "info").upper()
+        lines.append(f"[{severity}] {finding['message']}")
+        hint = finding.get("hint")
+        if hint:
+            lines.append(f"          -> {hint}")
+    return lines

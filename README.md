@@ -130,10 +130,12 @@ STAR-CCM+ 导入时会忽略它们，网格不受影响；但可以用
 | 自动生成 | `gph2ccm.Note.MultiProcessor` | `unsupported` |
 | 自动生成 | `gph2ccm.Note.Dimension` | `2D` / `3D`（按顶点包围盒各方向跨度判断） |
 | 自动生成 | `gph2ccm.Note.TwoDWrapping` | `unsupported`（2D 时）/ `n/a` |
-| 自动生成 | `gph2ccm.Qual.Summary` | 网格规模与问题计数摘要 |
+| 自动生成 | `gph2ccm.Qual.Summary` | 网格规模与问题计数摘要（`ok` / `issues`） |
+| 自动生成 | `gph2ccm.Qual.Severity` | 最高严重级：`ok` / `warning` / `error` |
 | 自动生成 | `gph2ccm.Qual.Uncovered` | 未归入任何边界区域的边界面数 |
 | 自动生成 | `gph2ccm.Qual.Degenerate` | 退化边界面（顶点数 < 3）数 |
 | 自动生成 | `gph2ccm.Qual.Issues` | 诊断出的问题列表 |
+| 自动生成 | `gph2ccm.Qual.Hints` | 每条问题的修复建议（指向 STAR-CCM+ / topo_check） |
 
 未提供 regions JSON 时，上述 `Field.*` / `Solver.*` / `MRF.*` / `Periodic.*`
 节点不会写出，行为与旧版完全一致。
