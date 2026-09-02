@@ -185,8 +185,10 @@ README 的「导入后补充清单」只能靠手工对照。
   无通用子节点枚举、Simulation 无 getBoundaryManager、MRF manager 注册时机、
   虚拟 face id、InterfaceDefinitions 节点、启动器空格路径/wmic、GPH 无场/FPH 有场、
   并行 CCM 每分区单文件），避免换版本后重新踩坑。
-- D3 **性能基线**：330 万单元网格的写出耗时 / 内存峰值入基线，
-  防止回归（当前只有正确性回归）。
+- D3 ✅ **性能基线**：`tools/benchmark.py`（合成结构化六面体生成器 +
+  三阶段计时 + PeakWorkingSetSize 内存峰值）+ `docs/performance_baseline.md`
+  （330 万单元：build 0.60s / 1.36 GB，write 3.41s / 3.32 GB，compress 0.41s，
+  输出 399.7 MB）。防止性能回归（此前只有正确性回归）。
 - D4 高阶单元（#21）：legacy CCM 支持度调研，**低优先级**，有需求再启动。
 
 ### 推荐执行顺序
