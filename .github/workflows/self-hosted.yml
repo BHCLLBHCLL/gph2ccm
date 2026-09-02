@@ -1,0 +1,72 @@
+name: self-hosted
+
+# Runs on a machine with STAR-CCM+ / ccmio.dll installed (see
+# docs/self_hosted_ci.md for the one-time runner registration).  On hosted
+# runners the write/read tests are SKIPPED (no ccmio.dll); here the full suite
+# runs end to end against the real library.
+#
+# The `import-check` job needs a license and the local launcher workaround
+# (docs/version_behavior_table.md #10/#11), so it is manual-only.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  full-suite:
+    name: full suite + perf smoke
+    runs-on: [self-hosted, windows, starccm]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt pytest
+
+      - name: Full test suite (write/read against ccmio.dll)
+        # GPH2CCM_CCMIO_DLL is optional: ccmio.dll is auto-discovered inside
+        # the STAR-CCM+ installation on this runner.  Set the secret to pin a
+        # specific library path if auto-discovery is not wanted.
+        env:
+          GPH2CCM_CCMIO_DLL: ${{ secrets.GPH2CCM_CCMIO_DLL }}
+        run: python -m pytest tests/test_writer.py -v
+
+      - name: Performance regression smoke (1M cells)
+        run: python tools/benchmark.py --n 100
+
+  import-check:
+    name: end-to-end STAR-CCM+ import
+    runs-on: [self-hosted, windows, starccm]
+    if: github.event_name == 'workflow_dispatch'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Generate a small CCM mesh
+        env:
+          GPH2CCM_CCMIO_DLL: ${{ secrets.GPH2CCM_CCMIO_DLL }}
+        run: python tools/benchmark.py --n 30 --out bench.ccm
+
+      - name: Import in STAR-CCM+ (needs license)
+        # STARCCM_BIN can pin the launcher (e.g. a no-space junction layout or
+        # the .bat) when plain `starccm+` is not on PATH; see the registration
+        # doc for the launcher caveats.
+        env:
+          GPH2CCM_MESH: bench.ccm
+          STARCCM_BIN: ${{ secrets.STARCCM_BIN }}
+        shell: pwsh
+        run: |
+          $bin = if ($env:STARCCM_BIN) { $env:STARCCM_BIN } else { "starccm+" }
+          & $bin -batch tools/ImportCcmCheck.java

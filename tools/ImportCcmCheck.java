@@ -1,7 +1,11 @@
 // STAR-CCM+ batch macro: import a legacy .ccm mesh and print mesh statistics.
 //
+// The mesh path is taken from the GPH2CCM_MESH environment variable, falling
+// back to "bench.ccm" in the working directory (so it works unchanged inside
+// the self-hosted CI, which generates bench.ccm first).
+//
 // Usage:
-//   starccm+ -batch tools/ImportCcmCheck.java -batcharg "<path/to/mesh.ccm>"
+//   GPH2CCM_MESH=path/to/mesh.ccm starccm+ -batch tools/ImportCcmCheck.java
 
 import star.common.*;
 import java.io.File;
@@ -11,7 +15,11 @@ public class ImportCcmCheck extends StarMacro
     @Override
     public void execute()
     {
-        String path = "D:\\training\\cgns\\gph2ccm\\tests\\laptop_thermal_steady_scaled_v3_fanonly_simplec_split.ccm";
+        String path = System.getenv("GPH2CCM_MESH");
+        if (path == null || path.trim().isEmpty())
+        {
+            path = "bench.ccm";
+        }
         Simulation simulation = null;
         try
         {

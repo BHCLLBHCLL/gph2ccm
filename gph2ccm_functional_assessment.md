@@ -177,9 +177,12 @@ README 的「导入后补充清单」只能靠手工对照。
 
 ### 阶段 D：工程化与长期维护（滚动进行）
 
-- D1 **self-hosted CI runner**：在装有 STAR-CCM+ 的机器上挂
-  `GPH2CCM_CCMIO_DLL` secret，CI 跑全量 14 用例 + `ImportCcmCheck.java`
-  端到端导入（当前托管 runner 只能跑 3 个纯逻辑用例）。
+- D1 ⚙️ **self-hosted CI runner**：workflow 与注册文档已就绪
+  （`.github/workflows/self-hosted.yml` + `docs/self_hosted_ci.md`）——
+  `full-suite` 每次 push 跑全量 27 用例（`runs-on: [self-hosted,windows,starccm]`）
+  + 1M 单元性能冒烟；`import-check`（仅手动）生成小网格后 `starccm+ -batch`
+  端到端导入。**待用户**：在装有 STAR-CCM+ 的机器上按文档注册 runner
+  （需一次性 GitHub token），可选配 `GPH2CCM_CCMIO_DLL` / `STARCCM_BIN` secret。
 - D2 ✅ **版本行为对照表**：`docs/version_behavior_table.md`（14 条实测差异：
   2D 分块偏移 bug、`CCMIOReadNodestr` char** 签名、32 字符节点名上限、
   无通用子节点枚举、Simulation 无 getBoundaryManager、MRF manager 注册时机、

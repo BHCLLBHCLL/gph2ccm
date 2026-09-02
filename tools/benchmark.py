@@ -216,7 +216,9 @@ class Stage:
         self.peak_rss = 0
 
 
-def run_benchmark(mesh: dict, chunk_faces: int, compress: bool, ccmio_dll) -> dict:
+def run_benchmark(
+    mesh: dict, chunk_faces: int, compress: bool, ccmio_dll, out: str | None = None
+) -> dict:
     ld = mesh["link_data"]
 
     def measure(stage: Stage, fn):
@@ -229,7 +231,10 @@ def run_benchmark(mesh: dict, chunk_faces: int, compress: bool, ccmio_dll) -> di
               "compress": Stage("compress")}
 
     model = None
-    out_path = Path(os.environ.get("TEMP", "/tmp")) / "gph2ccm_benchmark.ccm"
+    keep = out is not None
+    out_path = Path(out) if keep else (
+        Path(os.environ.get("TEMP", "/tmp")) / "gph2ccm_benchmark.ccm"
+    )
 
     def do_build():
         nonlocal model
@@ -256,10 +261,11 @@ def run_benchmark(mesh: dict, chunk_faces: int, compress: bool, ccmio_dll) -> di
         measure(stages["compress"], do_compress)
 
     size_mb = out_path.stat().st_size / 1e6 if out_path.exists() else 0.0
-    try:
-        out_path.unlink()
-    except OSError:
-        pass
+    if not keep:
+        try:
+            out_path.unlink()
+        except OSError:
+            pass
 
     result = {
         "n_cells": int(ld["n_cells"]),
@@ -306,6 +312,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--chunk-faces", type=int, default=500_000)
     ap.add_argument("--no-compress", action="store_true")
     ap.add_argument("--ccmio-dll", default=None)
+    ap.add_argument("--out", default=None,
+                    help="keep the output .ccm at this path (default: temp + delete)")
     ap.add_argument("--json", action="store_true")
     args = ap.parse_args(argv)
 
@@ -317,7 +325,7 @@ def main(argv: list[str] | None = None) -> int:
         mesh = synthetic_hex_mesh(args.n)
 
     result = run_benchmark(
-        mesh, args.chunk_faces, not args.no_compress, args.ccmio_dll
+        mesh, args.chunk_faces, not args.no_compress, args.ccmio_dll, args.out
     )
 
     if args.json:
