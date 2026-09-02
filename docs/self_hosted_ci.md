@@ -12,64 +12,184 @@ self-hosted runner，就能把 27 个用例全量跑通，并可选做 STAR-CCM+
 - `import-check`（仅手动 `workflow_dispatch`）：生成小网格 → `starccm+ -batch`
   端到端导入并打印单元/顶点/边界统计。需要 license。
 
-## 一次性注册（在装有 STAR-CCM+ 的 Windows 机器上）
+---
 
-1. GitHub 仓库 → **Settings → Actions → Runners → New self-hosted runner**，
-   平台选 **Windows**、架构 **x64**，复制它给出的命令（含一次性 token）。
+## 前置条件
 
-2. 在目标机器上执行（`actions-runner` 目录放哪都行，建议 `C:\actions-runner`）：
+- 一台 **Windows x64** 机器，已装 STAR-CCM+（本仓库验证版本 20.02.007-R8，
+  安装于 `C:\Program Files\Siemens\20.02.007-R8\`）。
+- 能在该机器上打开 **管理员 PowerShell**（第 4 步装服务需要管理员）。
+- 能登录该 GitHub 仓库的账号（用于获取第 0 步的一次性注册 token）。
 
-   ```bat
-   mkdir C:\actions-runner
-   cd /d C:\actions-runner
-   # 下载并解压 runner（用仓库页面给的最新 URL）
-   curl -o actions-runner-win-x64.zip -L <actions-runner-win-x64-<ver>.zip>
-   tar -xf actions-runner-win-x64.zip
-   ```
+---
 
-3. 配置并**加上标签**（workflow 的 `runs-on` 依赖这些标签）：
+## 一次性注册（照抄即可）
 
-   ```bat
-   config.cmd --url https://github.com/BHCLLBHCLL/gph2ccm --token <TOKEN> ^
-     --name <机器名> --labels self-hosted,windows,starccm
-   ```
+### 第 0 步：取一次性注册 token
 
-   如果已配置过、漏了标签，直接编辑 `C:\actions-runner\.runner` 同目录的
-   `run.cmd` 里的 `--labels`，或重跑 `config.cmd --replace`。
+打开仓库页面 **Settings → Actions → Runners → New self-hosted runner**，
+平台选 **Windows**、架构 **x64**。页面会给出形如下面的命令：
 
-4. 安装为服务（开机自启）：
+```bat
+./config.cmd --url https://github.com/BHCLLBHCLL/gph2ccm --token AAAA...
+```
 
-   ```bat
-   run.cmd            # 前台跑一次，确认能连上（看到 "Listening for Jobs"）
-   svc.cmd install    # 之后作为服务运行
-   svc.cmd start
-   ```
+其中的 `AAAA...` 就是注册 token。**注意**：
+
+- 这是**注册专用的一次性 token，不是个人访问令牌（PAT）**，约 1 小时后失效；
+  过期了回到该页面再点一次重新生成即可。
+- 它只在第 2 步 `config.cmd` 里用一次，之后被写入本地 `.runner` / 凭据文件，
+  无需重复输入。
+
+### 第 1 步：下载并解压 runner
+
+在**管理员 PowerShell** 里执行（版本 v2.337.0 为当前最新，如需更新版本号，
+到 `https://github.com/actions/runner/releases` 看最新 `tag` 即可）：
+
+```powershell
+New-Item -ItemType Directory -Force C:\actions-runner | Out-Null
+Set-Location C:\actions-runner
+Invoke-WebRequest -Uri "https://github.com/actions/runner/releases/download/v2.337.0/actions-runner-win-x64-2.337.0.zip" -OutFile "actions-runner-win-x64-2.337.0.zip"
+Expand-Archive -Path "actions-runner-win-x64-2.337.0.zip" -DestinationPath .
+```
+
+（可选）校验完整性——官方发布页附有 `*.zip.sha256`，下载后：
+
+```powershell
+(Get-FileHash actions-runner-win-x64-2.337.0.zip -Algorithm SHA256).Hash.ToLower()
+```
+
+与官方页面对照一致即可。
+
+### 第 2 步：配置并打标签
+
+`runs-on` 依赖三个标签：`self-hosted`（GitHub 自动加）+ `windows` + `starccm`
+（自定义）。因此**只传两个自定义标签**即可：
+
+```powershell
+.\config.cmd --url https://github.com/BHCLLBHCLL/gph2ccm --token AAAA... `
+  --name (hostname)-starccm --work _work --labels windows,starccm
+```
+
+说明：
+
+- `--token AAAA...` 换成第 0 步拿到的 token。
+- `--name` 建议用 `机器名-starccm`，便于在 Actions 页面区分多台 runner。
+- `--work` 是工作目录名，默认 `_work`，显式给出可避免交互提示。
+- 若仍弹出「Enter name of work folder / run group」之类的提示，直接按 **Enter**
+  取默认值。
+- 别传 `self-hosted` 到 `--labels`：它由 GitHub 自动附加，重复传可能造成标签
+  列表里出现两条同名。
+
+配置成功后，Actions 页面 **Settings → Actions → Runners** 里应能看到该 runner
+处于 `Idle`，标签列显示 `self-hosted, windows, starccm`。
+
+### 第 3 步：前台自检一次
+
+```powershell
+.\run.cmd
+```
+
+看到 `Listening for Jobs` 即连通成功。按 `Ctrl+C` 停掉，再装服务。
+
+### 第 4 步：安装为服务（开机自启）
+
+```powershell
+.\svc.cmd install
+.\svc.cmd start
+```
+
+- `svc.cmd install` 需要**管理员**权限（前面已用管理员 PowerShell，天然满足）。
+- 装完后可用 `Get-Service actions.runner.*` 查看，或 `svc.cmd status` 查状态。
+- 想移除：`svc.cmd stop` → `svc.cmd uninstall`。
+
+### 一键脚本（PowerShell，管理员，已含第 0 步 token）
+
+把 `TOKEN` 和 `NAME` 替换后整体粘贴：
+
+```powershell
+$ErrorActionPreference = "Stop"
+$TOKEN = "AAAA..."            # 第 0 步的注册 token
+$NAME  = "$env:COMPUTERNAME-starccm"
+$VER   = "2.337.0"
+
+New-Item -ItemType Directory -Force C:\actions-runner | Out-Null
+Set-Location C:\actions-runner
+Invoke-WebRequest -Uri "https://github.com/actions/runner/releases/download/v$VER/actions-runner-win-x64-$VER.zip" -OutFile "runner.zip"
+Expand-Archive -Path "runner.zip" -DestinationPath .
+.\config.cmd --url https://github.com/BHCLLBHCLL/gph2ccm --token $TOKEN --name $NAME --work _work --labels windows,starccm
+.\svc.cmd install
+.\svc.cmd start
+Write-Host "done. status:"; .\svc.cmd status
+```
+
+---
+
+## ccmio.dll 自动发现（full-suite 无需 secret）
+
+`gph2ccm/ccmio.py::find_ccmio_library()` 按以下顺序找库，命中最先存在的：
+
+1. 环境变量 `GPH2CCM_CCMIO_DLL`（若设）。
+2. 以下 glob（Windows）：
+   - `C:\Program Files\Siemens\*\STAR-CCM+*\star\lib\win64\*\lib\ccmio.dll`
+   - `D:\Program Files\Siemens\*\STAR-CCM+*\star\lib\win64\*\lib\ccmio.dll`
+   - `C:\Program Files (x86)\Siemens\*\STAR-CCM+*\star\lib\win64\*\lib\ccmio.dll`
+   - `D:\Program Files (x86)\Siemens\*\STAR-CCM+*\star\lib\win64\*\lib\ccmio.dll`
+   - `C:\Siemens\*\STAR-CCM+*\star\lib\win64\*\lib\ccmio.dll`
+3. DLL 搜索路径上的 `ccmio.dll` / `libccmio.so` / `libccmio.dylib` / `ccmio.so`。
+
+本机标准安装（`C:\Program Files\Siemens\20.02.007-R8\...`）命中第 2 条，因此
+`full-suite` 跑在 runner 上时**无需任何 secret**，只要该机器装了 STAR-CCM+。
+
+---
 
 ## 可选 secret（都不是必须）
 
+设置位置：**Settings → Secrets and variables → Actions → Repository secrets**。
+
 | secret | 用途 | 是否必须 |
 |---|---|---|
-| `GPH2CCM_CCMIO_DLL` | 固定 ccmio.dll 路径 | 否——runner 上已能自动发现 `C:\Program Files\Siemens\*\STAR-CCM+*\star\lib\win64\*\lib\ccmio.dll` |
-| `STARCCM_BIN` | `import-check` 用的启动器路径 | 否——默认 `starccm+`，仅当 PATH 上没有、或需用无空格 junction 布局时设 |
+| `GPH2CCM_CCMIO_DLL` | 固定 ccmio.dll 路径，覆盖自动发现 | 否——除非自动发现路径不对、或想锁定某版本 |
+| `STARCCM_BIN` | `import-check` 用的 STAR-CCM+ 启动器路径 | 否——默认 `starccm+`，仅当 PATH 上无、或需用无空格 junction 布局时设 |
 
-设置位置：**Settings → Secrets and variables → Actions → Repository secrets**。
+---
 
 ## STAR-CCM+ 启动器踩坑（import-check 用）
 
 见 `docs/version_behavior_table.md` #10/#11：
 
 - **#10**：sh 启动器对含空格路径解析失败（`/c/Program Files` 被截断）。用
-  junction 镜像无空格布局（`C:\sc8` = star+boost 等分包、`C:\jdk`），或直接
-  调 `.bat`。
+  junction 镜像无空格布局，或直接调 `.bat`。
 - **#11**：`.bat` 内部调 `wmic.exe`（部分安全策略拦截）；headless batch 需
   license（`license.dat`，`ccmpsuite`）。**ccmio.dll 写文件本身不需要
   license**，所以 `full-suite` 不依赖 license，只有 `import-check` 依赖。
 
-如果本机启动器是 `C:\sc8\...\starccm+.bat` 这样的无空格布局，设
-`STARCCM_BIN` 指向它，`import-check` 就能跑。
+本机实测的可用无空格布局：
 
-## 验证
+- 启动器：`C:\sc8\star\bin\starccm+` 或 `C:\sc8\star\bin\starccm+.bat`
+- license：`C:\Program Files\Siemens\license.dat`
 
-1. 手动触发一次 workflow：**Actions → self-hosted → Run workflow**。
-2. `full-suite` 应显示 27 passed 0 skipped（不再有 ccmio 相关的 skip）。
-3. （可选）再触发一次并勾选 import-check，看 `IMPORT_DONE` 与 `CELLS/…` 输出。
+若你机器上存在类似的 `C:\sc8\...\starccm+.bat`，把 `STARCCM_BIN` secret 设为
+该路径（例如 `C:\sc8\star\bin\starccm+.bat`），`import-check` 即可在 headless
++ license 环境跑通。否则可只跑 `full-suite`，`import-check` 留待需要时再配。
+
+---
+
+## 验证清单
+
+1. Actions 页面 **Settings → Actions → Runners**：runner 处于 `Idle`，标签含
+   `windows`、`starccm`（外加自动的 `self-hosted`）。
+2. 手动触发一次：**Actions → self-hosted → Run workflow → Run workflow**。
+3. `full-suite`：应显示 **27 passed 0 skipped**（不再有 ccmio 相关的 skip），
+   且 `Performance regression smoke` 步骤正常输出 1M 单元耗时。
+4. （可选）再次触发并走 `import-check`，看日志出现 `IMPORT_DONE` 与
+   `CELLS/VERTS/BC` 统计行。
+
+## 常见问题
+
+- **runner 一直 `Offline`**：看 `svc.cmd status` / `_diag` 目录日志；多半是
+  服务没启动或 token 过期，重跑 `config.cmd` 刷新 token。
+- **`full-suite` 仍出现 ccmio skip**：说明自动发现没命中，设
+  `GPH2CCM_CCMIO_DLL` secret 指向真实 `ccmio.dll` 绝对路径。
+- **`import-check` 报 license / 启动器错误**：回到上节「启动器踩坑」，用
+  `C:\sc8` 无空格 junction 布局 + 设 `STARCCM_BIN`。
