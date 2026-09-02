@@ -20,6 +20,7 @@
 | 12 | gphdecoding | **GPH 网格无结果场**；同体系 **FPH 文件（魔数 `CRDL-FLD`）携带 FlowSolution**（`fph2cgns.py` 已解析） | C2（初始场写入）依赖 FPH 输入扩展，见评估文档 §6-C2 结论 |
 | 13 | gphdecoding | 结果 dict 布局：`link_data`（`npe/face_nodes/face_offsets/owner/neighbor/boundary_faces`）+ `vertices` + `cvol_id/parts_with_cvol/volume_regions/surface_regions` | `_face_unique_vertices` 等必须用 `face_offsets` 索引 `face_nodes`（`_face_starts` 是 CCM 流偏移，不可混用） |
 | 14 | libccmio | `CCMIOWriteProcessor` 的 `verticesFile/topologyFile/initialFieldFile/solutionFile` 参数：并行 CCM = 主文件 + 每分区独立文件 | C3（多 processor）采用每分区单文件方案，见评估文档 §6-C3 结论 |
+| 15 | legacy CCM / STAR-CCM+ | **无高阶（二次）单元语义**：上游 GPH 是线性网格（无 mid-side node）；libccmio 面流任意 nVerts 只是多边形面、无「边中点/曲线」语义；`CellTopologyType`（PROSTAR 形状码）只有线性形状（tet/hex/wedge/pyramid/polygon/polyhedron=255），无二次形状码；STAR-CCM+ 的 `STAR_QUADRATIC_*`（21–26/29）属有限元求解器、与 legacy CCM FV 导入无关，UserGuide 全文 0 处「curved mesh」导入 | 高阶单元导出**不可行**（#21 永久 ❌），见评估文档 §6-D4；若未来上游出现真高阶数据源，须改用 STAR-CCM+ 原生格式而非 legacy CCM |
 
 ## 维护约定
 

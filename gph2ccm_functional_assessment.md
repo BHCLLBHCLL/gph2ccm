@@ -56,7 +56,7 @@
 | 18 | 2D 网格包裹 | ❌ | 不挤出壳层；新增 2D 检测 + `gph2ccm.Note.Dimension`/`TwoDWrapping` 自说明（包裹不在范围内） |
 | 19 | 单元 / 节点场数据 | ❌ | 无 |
 | 20 | 网格质量修复 | ⚠️ | 仍不修改网格；新增导出期内嵌 `gph2ccm.Qual.*` 摘要（未覆盖/退化面计数）+ `diagnose_quality` API；重检查仍在 `tools/topo_check.py` |
-| 21 | 高阶单元（2 阶） | ❌ | legacy CCM 一般不支持，未做适配 |
+| 21 | 高阶单元（2 阶） | ❌ | 已调研（D4）：**legacy CCM 无高阶语义**——上游 GPH 线性、`CellTopologyType` 仅线性形状码、STAR-CCM+ 全文 0 处 curved 导入。非「未适配」，而是格式链两端均无高阶数据 |
 
 **完整度统计**：21 项中已实现 12、部分 7、缺失 2（#12 多处理器、#21 高阶单元仍为 ❌）→
 **核心网格层完整覆盖，物理 / 求解层进入「描述性元数据 + 诊断」阶段（可携带/校验信息但非求解就绪）**。
@@ -183,16 +183,24 @@ README 的「导入后补充清单」只能靠手工对照。
   + 1M 单元性能冒烟；`import-check`（仅手动）生成小网格后 `starccm+ -batch`
   端到端导入。**待用户**：在装有 STAR-CCM+ 的机器上按文档注册 runner
   （需一次性 GitHub token），可选配 `GPH2CCM_CCMIO_DLL` / `STARCCM_BIN` secret。
-- D2 ✅ **版本行为对照表**：`docs/version_behavior_table.md`（14 条实测差异：
+- D2 ✅ **版本行为对照表**：`docs/version_behavior_table.md`（15 条实测差异：
   2D 分块偏移 bug、`CCMIOReadNodestr` char** 签名、32 字符节点名上限、
   无通用子节点枚举、Simulation 无 getBoundaryManager、MRF manager 注册时机、
   虚拟 face id、InterfaceDefinitions 节点、启动器空格路径/wmic、GPH 无场/FPH 有场、
-  并行 CCM 每分区单文件），避免换版本后重新踩坑。
+  并行 CCM 每分区单文件、legacy CCM 无高阶单元语义），避免换版本后重新踩坑。
 - D3 ✅ **性能基线**：`tools/benchmark.py`（合成结构化六面体生成器 +
   三阶段计时 + PeakWorkingSetSize 内存峰值）+ `docs/performance_baseline.md`
   （330 万单元：build 0.60s / 1.36 GB，write 3.41s / 3.32 GB，compress 0.41s，
   输出 399.7 MB）。防止性能回归（此前只有正确性回归）。
-- D4 高阶单元（#21）：legacy CCM 支持度调研，**低优先级**，有需求再启动。
+- D4 ✅ 高阶单元（#21）调研完成：**legacy CCM 无高阶语义**，结论永久成立——
+  ① 上游 GPH 为线性网格（gphdecoding 全库无 quadratic/curved/mid-side，`LS_Nodes`
+  只有顶点坐标、`LS_Links` 的 npe=3..11 是任意多边形/多面体面而非二次面）；
+  ② libccmio 面流虽可装任意 nVerts，但只是「多边形面」，无「边中点/曲线几何」语义；
+  ③ legacy CCM 单元形状由 `CellTopologyType`（PROSTAR 形状码）表达，只有线性形状
+  （tet/hex/wedge/pyramid/polygon/polyhedron=255），无二次形状码；
+  ④ STAR-CCM+ 的 `STAR_QUADRATIC_*`（21–26/29）是**有限元求解器**的单元类型，与
+  legacy CCM 的 FV 导入路径无关，UserGuide 明说 mesher 不生成 mid-side node、
+  全文 0 处「curved mesh/cell」导入。#21 保持 ❌ 是正确且永久的（非「未适配」）。
 
 ### 推荐执行顺序
 
