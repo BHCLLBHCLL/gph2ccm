@@ -22,11 +22,12 @@
 
 **一句话结论**：核心网格拓扑骨架（顶点 / 内部面 / 边界 / 单元类型 /
 多 region + interface）**完整且经真实大网格验证**，本质是「网格搬运器」。
-**物理与求解层**原为完全空白，现已推进到「描述性元数据载体」阶段：
-边界条件（结构化类型 + 参数）、结果场定义、求解设置均可经 `regions` JSON
-以 `gph2ccm.BC.*` / `gph2ccm.Field.*` / `gph2ccm.Solver.*` 命名空间写入
-`.ccm`，**纯描述、不求解**（"keep boundary" 范围决策）。距离「求解器就绪
-导出器」仍差真正的物理求解属性写入。
+**物理与求解层**已突破到「真实场数据」阶段：边界条件（结构化类型 + 参数）、
+结果场定义、求解设置均可经 `regions` JSON 以 `gph2ccm.BC.*` / `gph2ccm.Field.*` /
+`gph2ccm.Solver.*` 命名空间写入 `.ccm`（纯描述）；**周期配对（C1）已生效写入
+`InterfaceDefinitions`，真实 cell 场数据（C2 第一切片）已可经
+`model.solution_fields` 写入并读回**。距离「求解器就绪导出器」仍差 FPH 场
+自动管线、MRF/边界条件的求解级写入。
 
 ---
 
@@ -48,18 +49,18 @@
 | 10 | Reorder（RCM 单元重排） | ✅ | 可选，降低导入重排开销 |
 | 11 | Verify 读回校验 | ✅ | H1 已修复：split 模式 interface 两侧共享面不再误报（relaxed 校验） |
 | 12 | Multiple Processors（分布式） | ❌ | 单 processor（legacy CCM 固有限制）；已写入 `gph2ccm.Note.Processors`/`MultiProcessor` 自说明元数据 + 大网格告警 |
-| 13 | Solution Fields（结果场） | ⚠️ | 不写实际场数据；可经 `regions["fields"]` 写入 `gph2ccm.Field.*` **描述性**场定义 |
+| 13 | Solution Fields（结果场） | ✅ | C2 第一切片：`model.solution_fields`（标量/向量）经 FieldSet/FieldPhase/Field/FieldData 写入**真实场数据**（1M 单元冒烟 + 往返单测）；FPH 输入扩展待排 |
 | 14 | Boundary Conditions（含对称 / 周期配对） | ⚠️ | 结构化类型规范化 + `gph2ccm.BC.*` 描述性参数（`regions` JSON 驱动）；**周期配对已生效**（C1），其余仍非求解就绪 |
 | 15 | Material / Region 求解属性 | ⚠️ | 新增 `gph2ccm.Solver.*` 描述性求解设置元数据（`regions` JSON 驱动），仍非实际属性 |
 | 16 | MRF（旋转参考系） | ⚠️ | 不自动施加旋转条件；可经 `regions["mrf"]` 写入 `gph2ccm.MRF.*` **描述性**旋转参考系声明 |
 | 17 | Periodic / Cyclic 配对 | ⚠️ | 不生成几何配对界面；可经 `regions["periodic"]` 写入 `gph2ccm.Periodic.*` **描述性**配对声明 |
 | 18 | 2D 网格包裹 | ❌ | 不挤出壳层；新增 2D 检测 + `gph2ccm.Note.Dimension`/`TwoDWrapping` 自说明（包裹不在范围内） |
-| 19 | 单元 / 节点场数据 | ❌ | 无 |
+| 19 | 单元 / 节点场数据 | ✅ | C2 第一切片：cell 中心场数据（标量 + 矢量分量）作为真实 CCM post data 写入并读回验证；vertex 场与 FPH 自动管线待排 |
 | 20 | 网格质量修复 | ⚠️ | 仍不修改网格；新增导出期内嵌 `gph2ccm.Qual.*` 摘要（未覆盖/退化面计数）+ `diagnose_quality` API；重检查仍在 `tools/topo_check.py` |
 | 21 | 高阶单元（2 阶） | ❌ | 已调研（D4）：**legacy CCM 无高阶语义**——上游 GPH 线性、`CellTopologyType` 仅线性形状码、STAR-CCM+ 全文 0 处 curved 导入。非「未适配」，而是格式链两端均无高阶数据 |
 
-**完整度统计**：21 项中已实现 12、部分 7、缺失 2（#12 多处理器、#21 高阶单元仍为 ❌）→
-**核心网格层完整覆盖，物理 / 求解层进入「描述性元数据 + 诊断」阶段（可携带/校验信息但非求解就绪）**。
+**完整度统计**：21 项中已实现 14、部分 5、缺失 2（#12 多处理器、#21 高阶单元仍为 ❌）→
+**核心网格层完整覆盖；物理 / 求解层进入「真实场数据 + 描述性元数据 + 诊断」阶段**（C2 第一切片已写入真实 cell 场数据）。
 
 ---
 
@@ -123,9 +124,9 @@ Configuration=IN_PLACE / ConditionType=InternalInterface）、两侧带单元数
 
 ## 5. 关键缺口（按影响排序）
 
-> 执行进度（对应原始 8 项清单）：**#8 测试 ✅、#2 边界条件结构化 ✅、#1 结果场/求解设置 ⚠️、#3 MRF ⚠️、#4 周期/滑移配对 ✅（C1 已生效，描述性节点保留）、#5 多 processor ⚠️、#6 2D 包裹 ⚠️、#7 质量诊断 ⚠️ —— 除周期配对外，物理/求解层均为描述性/诊断性，非求解就绪**。
+> 执行进度（对应原始 8 项清单）：**#8 测试 ✅、#2 边界条件结构化 ✅、#1 结果场/求解设置 ✅（C2 第一切片：真实场数据写入，2026-09-03）、#3 MRF ⚠️、#4 周期/滑移配对 ✅（C1 已生效，描述性节点保留）、#5 多 processor ⚠️、#6 2D 包裹 ⚠️、#7 质量诊断 ⚠️ —— 除场数据与周期配对外，物理/求解层仍为描述性/诊断性**。
 
-1. **无结果场 / 求解设置** —— ⚠️ 已有描述性载体：经 `regions["fields"]` / `regions["solver_settings"]` 写入 `gph2ccm.Field.*` / `gph2ccm.Solver.*` 命名空间节点；**非实际场数据、不求解**（"keep boundary" 范围）。
+1. **无结果场 / 求解设置** —— ✅ 真实场数据写入已落地（C2 第一切片）：`model.solution_fields`（标量/向量）经 FieldSet/FieldPhase/Field/FieldData 写入 processor solution 槽，STAR-CCM+ 可作为导入后处理数据读取；求解设置仍为 `gph2ccm.Solver.*` 描述性元数据（`regions["solver_settings"]`）。
 2. **边界条件仅类型名** —— ⚠️ 已结构化：`boundary_conditions` 经 `_normalize_bctype` 规范化类型 + `gph2ccm.BC.*` 描述性参数（regions JSON 驱动），仍非求解就绪。
 3. **MRF 仅 region 划分** —— ⚠️ 已有描述性旋转参考系声明：经 `regions["mrf"]` 写入 `gph2ccm.MRF.*`（region/type/axis/origin/omega/units），**非真实旋转条件**。
 4. **周期 / 滑移界面配对** —— ✅ 从「描述」升级为「生效」：`regions["periodic"]`
@@ -172,7 +173,7 @@ README 的「导入后补充清单」只能靠手工对照。
 | # | 任务 | 前置条件 | 说明 |
 |---|---|---|---|
 | C1 ✅ | `PeriodicBoundaries` / `Interfaces` 节点写入（周期配对从「描述」变「生效」） | 周期对几何匹配算法（主/影子面按转角/平移配对）；样本 `bladerotating_dm2.ccm` 已在手 | 矩阵 #6/#17，对叶轮机械用户价值最高 |
-| C2 | 初始场写入（`FieldSet` / `Field` / `FieldData`） | **可行性结论（2026-09-02）**：✅ 技术可行——libccmio 有完整 Field API（`CCMIONewField` + `CCMIOWriteFieldDataf` 等，见 `ccmio.h:452,884-970`）；GPH 网格本身无场，但同体系的 **FPH 结果文件**（魔数 `CRDL-FLD`）携带 FlowSolution，`gphdecoding/fph2cgns.py` 已能解析并写 CGNS FlowSolution。**排期**：作为独立里程碑（FPH 输入扩展 + 场-网格 cell 掩码对应 + CCM FieldPhase/Field/FieldData 写入），中等工作量；用户无 FPH 结果文件时维持现状（`gph2ccm.Field.*` 描述层） | 矩阵 #13/#19；依赖 FPH 结果文件，需用户配合提供 |
+| C2 ⚙️ | 初始场写入（`FieldSet` / `Field` / `FieldData`） | **可行性结论（2026-09-02）**：✅ 技术可行——libccmio 有完整 Field API（`CCMIONewField` + `CCMIOWriteFieldDataf` 等，见 `ccmio.h:452,884-970`）。**第一切片已完成（2026-09-03）**：`model.solution_fields`（标量 `(n,)` / 向量 `(n,3)`，向量按官方 `writeexample.cpp` 拆 X/Y/Z 分量子场）→ FieldSet/FieldPhase/Field/FieldData 写入并挂 processor solution 槽；写入侧 1M 单元冒烟（+4 场 +16 MB、读回字段名/数值正确）+ 往返/校验单测共 29 passed。**剩余**：FPH 结果文件自动管线（魔数 `CRDL-FLD`，`gphdecoding/fph2cgns.py` 已能解析 FlowSolution → cell 掩码对应）+ CLI 入口；用户无 FPH 结果文件时可用 API 手动供数 | 矩阵 #13/#19 已升级为 ✅（写入侧） |
 | C3 | 多 processor 写入 | **可行性结论（2026-09-02）**：✅ 技术可行——`CCMIOWriteProcessor` 的 `verticesFile/topologyFile/initialFieldFile/solutionFile` 参数证实 STAR-CCM+ 并行 CCM 采用**每分区独立文件**组织（主 `.ccm` + 每 processor 一个分区文件），libccmio 完整支持；2D 分块 bug 与分区无关（单次写入已规避）。**排期**：靠后——主要工作量在网格分区算法（几何/METIS 级），且 STAR-CCM+ 导入单 processor CCM 后会自动分区，多 processor 文件的导入侧收益待确认；无明确需求前维持单 processor + `gph2ccm.Note.MultiProcessor` 自说明 | 矩阵 #12；价值取决于导入侧是否真需要预分区 |
 
 ### 阶段 D：工程化与长期维护（滚动进行）

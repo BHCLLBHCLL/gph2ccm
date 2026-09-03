@@ -28,6 +28,31 @@ class BoundaryRegion:
 
 
 @dataclass
+class SolutionField:
+    """An actual solution field written as CCM FieldPhase/Field/FieldData (C2).
+
+    Unlike the *descriptive* ``CcmModel.fields`` entries (``gph2ccm.Field.*``
+    metadata nodes), these carry real per-cell float data that STAR-CCM+ can
+    import as imported solver post data.  Vector fields are detected from the
+    data shape (``(n, 3)``) and written as X/Y/Z component sub-fields using
+    the official ``writeexample.cpp`` pattern.
+    """
+
+    name: str  # full field name, <= 32 chars (kCCMIOMaxStringLength)
+    data: np.ndarray  # (n_cells,) scalar or (n_cells, 3) vector, float
+    short_name: str = ""  # prostar short name, <= 8 chars; derived if empty
+    location: str = "cell"  # "cell" (vertex fields not yet supported)
+    phase: int = 0  # FieldPhase index (0 = default / steady state)
+    units: str = ""  # descriptive only; recorded in the gph2ccm metadata layer
+
+
+# CCM format limits (ccmiotypes.h; kept in sync with ccmio.py without
+# importing the ctypes layer from the pure model module).
+K_CCMIO_MAX_STRING_LENGTH = 32
+K_CCMIO_PROSTAR_SHORT_NAME_LENGTH = 8
+
+
+@dataclass
 class CcmModel:
     vertices: np.ndarray  # (n, 3) float64, metres
     cell_types: np.ndarray  # (n_cells,) int32, 1-based cell-table ids
@@ -46,6 +71,8 @@ class CcmModel:
     solver_settings: dict = field(default_factory=dict)  # e.g. {"turbulence_model":"k-epsilon"}
     mrf: list = field(default_factory=list)  # rotating reference frames, descriptive
     periodic: list = field(default_factory=list)  # periodic/sliding pairings, descriptive
+    # C2: actual solution field data (written as real CCM Field entities).
+    solution_fields: list[SolutionField] = field(default_factory=list)
 
     @property
     def n_cells(self) -> int:
@@ -303,6 +330,7 @@ def build_model(
     solver_settings: Optional[dict] = None,
     mrf: Optional[list] = None,
     periodic: Optional[list] = None,
+    solution_fields: Optional[list] = None,
 ) -> CcmModel:
     """Assemble the CCM mesh model from a ``parse_gph_mesh`` result."""
     vertices = np.asarray(mesh["vertices"], dtype=np.float64)
@@ -379,7 +407,72 @@ def build_model(
         solver_settings=dict(solver_settings) if solver_settings else {},
         mrf=list(mrf) if mrf else [],
         periodic=list(periodic) if periodic else [],
+        solution_fields=_normalize_solution_fields(solution_fields),
     )
+
+
+def _normalize_solution_fields(raw: Optional[list]) -> list[SolutionField]:
+    """Coerce ``solution_fields`` entries to validated :class:`SolutionField`.
+
+    Fail-fast validation happens here (before any output exists):
+    name length, short-name length, data shape vs cell count, and the
+    2-D/3-D vector conventions.
+    """
+    if not raw:
+        return []
+    out: list[SolutionField] = []
+    for i, item in enumerate(raw):
+        if isinstance(item, SolutionField):
+            f = item
+        elif isinstance(item, dict):
+            f = SolutionField(
+                name=str(item["name"]),
+                data=item["data"],
+                short_name=str(item.get("short_name") or ""),
+                location=str(item.get("location") or "cell"),
+                phase=int(item.get("phase") or 0),
+                units=str(item.get("units") or ""),
+            )
+        else:
+            raise TypeError(
+                f"solution_fields[{i}]: expected SolutionField or dict, "
+                f"got {type(item).__name__}"
+            )
+        if not f.name:
+            raise ValueError(f"solution_fields[{i}]: name is required")
+        if len(f.name) > K_CCMIO_MAX_STRING_LENGTH:
+            raise ValueError(
+                f"solution_fields[{i}] ({f.name!r}): CCM field names are "
+                f"limited to {K_CCMIO_MAX_STRING_LENGTH} characters "
+                "(version_behavior_table #3)"
+            )
+        short = f.short_name or f.name
+        if len(short) > K_CCMIO_PROSTAR_SHORT_NAME_LENGTH:
+            short = short[:K_CCMIO_PROSTAR_SHORT_NAME_LENGTH]
+        data = np.asarray(f.data, dtype=np.float64)
+        if f.location != "cell":
+            raise ValueError(
+                f"solution_fields[{i}] ({f.name!r}): only 'cell' location is "
+                "supported (legacy CCM post data is cell-centred)"
+            )
+        if data.ndim == 2 and data.shape[1] == 3:
+            pass  # vector -- shape checked against n_cells by the writer
+        elif data.ndim != 1:
+            raise ValueError(
+                f"solution_fields[{i}] ({f.name!r}): data must be (n,) scalar "
+                f"or (n, 3) vector, got shape {data.shape}"
+            )
+        out.append(
+            SolutionField(
+                name=f.name,
+                data=data,
+                short_name=short,
+                location=f.location,
+                phase=f.phase,
+                units=f.units,
+            )
+        )
+    return out
 
 
 # ---------------------------------------------------------------------------

@@ -115,6 +115,11 @@ K_CCMIO_SCALAR = 1
 K_CCMIO_VECTOR = 2
 K_CCMIO_TENSOR = 3
 
+# CCMIOComponent (ccmiotypes.h)
+K_CCMIO_VECTOR_X = 0
+K_CCMIO_VECTOR_Y = 1
+K_CCMIO_VECTOR_Z = 2
+
 
 class CCMIOError(Exception):
     """Raised when a CCMIO call reports an error."""
@@ -376,6 +381,37 @@ class CCMIO:
         self._CCMIOV2WriteFaceCells = bind(
             "CCMIOV2WriteFaceCells", ctypes.c_int, err_p, CCMIOID, ctypes.c_int,
             uint, int_p, uint, uint,
+        )
+
+        # Fields (C2: actual solution data; recipes from docs/examples/
+        # writeexample.cpp of libccmio-2.6.1)
+        self._CCMIONewField = bind(
+            "CCMIONewField", ctypes.c_int, err_p, CCMIOID, char_p, char_p,
+            ctypes.c_int, id_p,
+        )
+        self._CCMIOReadField = bind(
+            "CCMIOReadField", ctypes.c_int, err_p, CCMIOID, char_p, char_p,
+            int_p, int_p,
+        )
+        self._CCMIOWriteFieldDataf = bind(
+            "CCMIOWriteFieldDataf", ctypes.c_int, err_p, CCMIOID, CCMIOID,
+            ctypes.c_int, float_p, uint, uint,
+        )
+        self._CCMIOReadFieldDataf = bind(
+            "CCMIOReadFieldDataf", ctypes.c_int, err_p, CCMIOID, id_p, int_p,
+            float_p, uint, uint,
+        )
+        self._CCMIOWriteConstantFieldDataf = bind(
+            "CCMIOWriteConstantFieldDataf", ctypes.c_int, err_p, CCMIOID,
+            CCMIOID, ctypes.c_int, ctypes.c_float,
+        )
+        self._CCMIOWriteMultiDimensionalFieldData = bind(
+            "CCMIOWriteMultiDimensionalFieldData", ctypes.c_int, err_p,
+            CCMIOID, ctypes.c_int, CCMIOID,
+        )
+        self._CCMIOReadMultiDimensionalFieldData = bind(
+            "CCMIOReadMultiDimensionalFieldData", ctypes.c_int, err_p,
+            CCMIOID, ctypes.c_int, id_p,
         )
 
     # -- error handling -----------------------------------------------------
@@ -643,6 +679,116 @@ class CCMIO:
         )
         self._check(code, "CCMIOReadProcessor")
         return vertices, topology, CCMIOID(), CCMIOID()
+
+    # -- fields (C2: actual solution data) -----------------------------------
+
+    def new_field(
+        self, phase: CCMIOID, name: str, short_name: str, dim: int
+    ) -> CCMIOID:
+        """Create a Field under the FieldPhase *phase* (CCMIONewField)."""
+        err = ctypes.c_int(K_CCMIO_NO_ERR)
+        out = CCMIOID()
+        code = self._CCMIONewField(
+            ctypes.byref(err), phase, _b(name), _b(short_name), dim,
+            ctypes.byref(out),
+        )
+        self._check(code, f"CCMIONewField({name})")
+        return out
+
+    def read_field(self, field: CCMIOID) -> tuple[str, str, int]:
+        """Return ``(name, short_name, dim)`` of a Field entity."""
+        name = ctypes.create_string_buffer(K_CCMIO_MAX_STRING_LENGTH + 1)
+        short = ctypes.create_string_buffer(K_CCMIO_PROSTAR_SHORT_NAME_LENGTH + 1)
+        dim = ctypes.c_int()
+        err = ctypes.c_int(K_CCMIO_NO_ERR)
+        code = self._CCMIOReadField(
+            ctypes.byref(err), field, name, short, ctypes.byref(dim), None
+        )
+        self._check(code, "CCMIOReadField")
+        return (
+            name.value.decode("utf-8", errors="replace"),
+            short.value.decode("utf-8", errors="replace"),
+            int(dim.value),
+        )
+
+    def write_field_dataf(
+        self, field: CCMIOID, map_id: CCMIOID, location: int, data: np.ndarray
+    ) -> None:
+        """Write float32 per-entity data for *field* (CCMIOWriteFieldDataf).
+
+        Creates the FieldData child entity itself, mirroring the official
+        ``writeexample.cpp`` flow (``CCMIONewEntity(field, kCCMIOFieldData)``
+        followed by ``CCMIOWriteFieldDataf``).
+        """
+        data = np.ascontiguousarray(data, dtype=np.float32)
+        field_data = self.new_entity(field, K_CCMIO_FIELD_DATA)
+        err = ctypes.c_int(K_CCMIO_NO_ERR)
+        code = self._CCMIOWriteFieldDataf(
+            ctypes.byref(err),
+            field_data,
+            map_id,
+            location,
+            data.ctypes.data_as(ctypes.POINTER(ctypes.c_float)),
+            K_CCMIO_START,
+            K_CCMIO_END,
+        )
+        self._check(code, "CCMIOWriteFieldDataf")
+
+    def write_constant_field_dataf(
+        self, field: CCMIOID, map_id: CCMIOID, location: int, value: float
+    ) -> None:
+        """Write a constant field value (CCMIOWriteConstantFieldDataf)."""
+        field_data = self.new_entity(field, K_CCMIO_FIELD_DATA)
+        err = ctypes.c_int(K_CCMIO_NO_ERR)
+        code = self._CCMIOWriteConstantFieldDataf(
+            ctypes.byref(err), field_data, map_id, location, ctypes.c_float(value)
+        )
+        self._check(code, "CCMIOWriteConstantFieldDataf")
+
+    def link_vector_component(
+        self, vector_field: CCMIOID, component: int, scalar_field: CCMIOID
+    ) -> None:
+        """Attach *scalar_field* as one X/Y/Z component of *vector_field*."""
+        err = ctypes.c_int(K_CCMIO_NO_ERR)
+        code = self._CCMIOWriteMultiDimensionalFieldData(
+            ctypes.byref(err), vector_field, component, scalar_field
+        )
+        self._check(code, "CCMIOWriteMultiDimensionalFieldData")
+
+    def read_vector_component(self, vector_field: CCMIOID, component: int) -> CCMIOID:
+        """Return the scalar Field holding one X/Y/Z component (readexample.cpp)."""
+        out = CCMIOID()
+        err = ctypes.c_int(K_CCMIO_NO_ERR)
+        code = self._CCMIOReadMultiDimensionalFieldData(
+            ctypes.byref(err), vector_field, component, ctypes.byref(out)
+        )
+        self._check(code, "CCMIOReadMultiDimensionalFieldData")
+        return out
+
+    def read_field_dataf(self, field: CCMIOID, n: int) -> np.ndarray:
+        """Read back *n* float32 values of a Field's FieldData (round-trip).
+
+        Follows ``readexample.cpp``: walk to the FieldData child with
+        ``CCMIONextEntity`` (never ``CCMIOGetEntity``), then read.
+        """
+        field_data = self.next_entity(field, K_CCMIO_FIELD_DATA, 0)
+        if field_data is None:
+            raise CCMIOError("field has no FieldData child")
+        out = np.empty(n, dtype=np.float32)
+        map_id = CCMIOID()
+        loc = ctypes.c_int()
+        err = ctypes.c_int(K_CCMIO_NO_ERR)
+        code = self._CCMIOReadFieldDataf(
+            ctypes.byref(err),
+            field_data,
+            ctypes.byref(map_id),
+            ctypes.byref(loc),
+            out.ctypes.data_as(ctypes.POINTER(ctypes.c_float)),
+            K_CCMIO_START,
+            K_CCMIO_END,
+        )
+        self._check(code, "CCMIOReadFieldDataf")
+        return out
 
     # -- optional nodes -----------------------------------------------------
 

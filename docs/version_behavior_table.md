@@ -21,6 +21,7 @@
 | 13 | gphdecoding | 结果 dict 布局：`link_data`（`npe/face_nodes/face_offsets/owner/neighbor/boundary_faces`）+ `vertices` + `cvol_id/parts_with_cvol/volume_regions/surface_regions` | `_face_unique_vertices` 等必须用 `face_offsets` 索引 `face_nodes`（`_face_starts` 是 CCM 流偏移，不可混用） |
 | 14 | libccmio | `CCMIOWriteProcessor` 的 `verticesFile/topologyFile/initialFieldFile/solutionFile` 参数：并行 CCM = 主文件 + 每分区独立文件 | C3（多 processor）采用每分区单文件方案，见评估文档 §6-C3 结论 |
 | 15 | legacy CCM / STAR-CCM+ | **无高阶（二次）单元语义**：上游 GPH 是线性网格（无 mid-side node）；libccmio 面流任意 nVerts 只是多边形面、无「边中点/曲线」语义；`CellTopologyType`（PROSTAR 形状码）只有线性形状（tet/hex/wedge/pyramid/polygon/polyhedron=255），无二次形状码；STAR-CCM+ 的 `STAR_QUADRATIC_*`（21–26/29）属有限元求解器、与 legacy CCM FV 导入无关，UserGuide 全文 0 处「curved mesh」导入 | 高阶单元导出**不可行**（#21 永久 ❌），见评估文档 §6-D4；若未来上游出现真高阶数据源，须改用 STAR-CCM+ 原生格式而非 legacy CCM |
+| 16 | libccmio-2.6.1 / ccmio.dll | **Field 写入配方（C2 实测）**：`FieldSet`（root 子节点）→ `CCMIONewIndexedEntity(FieldPhase, idx)` → `CCMIONewField(name, shortName, dim)` → `CCMIONewEntity(FieldData)` + `CCMIOWriteFieldDataf(mapID, kCCMIOCell, …)`；向量场按官方 writeexample 拆 X/Y/Z 标量分子场后 `CCMIOWriteMultiDimensionalFieldData` 链接；最后 FieldSet 经 `CCMIOWriteProcessor(solution=…)` 挂 processor。读回必须走 `CCMIONextEntity`（FieldData 子实体 `CCMIOGetEntity` 不可靠），向量分量经 `CCMIOReadMultiDimensionalFieldData` | field name ≤32 字符、prostar 短名 ≤8 字符（分量短名占末位 X/Y/Z）；`model.solution_fields` 归一化时 fail-fast 拦截（`model.py:_normalize_solution_fields`）。1M 单元 ×4 场实测：+16 MB 文件、+2.2 s 写入、读回数值正确 |
 
 ## 维护约定
 

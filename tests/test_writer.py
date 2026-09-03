@@ -1455,6 +1455,122 @@ def test_periodic_geometry_rejects_write() -> None:
     print("test_periodic_geometry_rejects_write OK")
 
 
+def test_solution_fields_roundtrip() -> None:
+    """C2: actual solution data survives a write -> read-back cycle.
+
+    Writes one scalar and one vector solution field, reopens the file and
+    verifies names / dimensionality / values through the same CCMIO path the
+    official ``readexample.cpp`` uses (FieldSet -> FieldPhase -> Field ->
+    FieldData, vector components via CCMIOReadMultiDimensionalFieldData).
+    """
+    from gph2ccm.ccmio import (
+        K_CCMIO_FIELD,
+        K_CCMIO_FIELD_PHASE,
+        K_CCMIO_FIELD_SET,
+        K_CCMIO_SCALAR,
+        K_CCMIO_VECTOR,
+        K_CCMIO_VECTOR_X,
+        K_CCMIO_VECTOR_Y,
+        K_CCMIO_VECTOR_Z,
+    )
+    from gph2ccm.model import SolutionField
+
+    mesh = make_synthetic_gph()
+    n = 8
+    scalar_vals = np.arange(n, dtype=np.float64) * 1.5
+    vector_vals = np.column_stack(
+        [np.arange(n, dtype=np.float64), np.full(n, -1.0), np.full(n, 2.5)]
+    )
+    model = build_model(
+        mesh,
+        {"fluid_regions": ["fluid"]},
+        solution_fields=[
+            SolutionField(name="Pressure", short_name="PRESS", data=scalar_vals),
+            SolutionField(name="Velocity", short_name="VELO", data=vector_vals),
+        ],
+    )
+    assert len(model.solution_fields) == 2
+
+    ccmio = _require_ccmio()
+    with tempfile.TemporaryDirectory(prefix="gph2ccm_fields_") as tmp:
+        out = Path(tmp) / "fields.ccm"
+        CcmMeshWriter(ccmio, out, verbose=False).write(model, mesh["link_data"])
+        ccmio.compress(out)
+
+        root = ccmio.open_file_readonly(out)
+        try:
+            fieldset = ccmio.next_entity(root, K_CCMIO_FIELD_SET, 0)
+            assert fieldset is not None, "no solution FieldSet in output"
+            phase = ccmio.next_entity(fieldset, K_CCMIO_FIELD_PHASE, 0)
+            assert phase is not None, "no FieldPhase under the solution FieldSet"
+
+            fields = {}  # name -> (short_name, dim, field id)
+            i = 0
+            while True:
+                f = ccmio.next_entity(phase, K_CCMIO_FIELD, i)
+                if f is None:
+                    break
+                name, short, dim = ccmio.read_field(f)
+                fields[name] = (short, dim, f)
+                i += 1
+
+            assert "Pressure" in fields and "Velocity" in fields, sorted(fields)
+            p_short, p_dim, p_field = fields["Pressure"]
+            assert p_short == "PRESS"
+            assert p_dim == K_CCMIO_SCALAR
+            np.testing.assert_allclose(
+                ccmio.read_field_dataf(p_field, n), scalar_vals, atol=1e-5
+            )
+
+            v_short, v_dim, v_field = fields["Velocity"]
+            assert v_short == "VELO"
+            assert v_dim == K_CCMIO_VECTOR
+            for comp, expected in (
+                (K_CCMIO_VECTOR_X, vector_vals[:, 0]),
+                (K_CCMIO_VECTOR_Y, vector_vals[:, 1]),
+                (K_CCMIO_VECTOR_Z, vector_vals[:, 2]),
+            ):
+                scalar = ccmio.read_vector_component(v_field, comp)
+                np.testing.assert_allclose(
+                    ccmio.read_field_dataf(scalar, n), expected, atol=1e-5
+                )
+        finally:
+            ccmio.close_file(root)
+    print("test_solution_fields_roundtrip OK")
+
+
+def test_solution_fields_validation() -> None:
+    """C2: bad solution field declarations fail before any output exists."""
+    from gph2ccm.model import SolutionField, _normalize_solution_fields
+
+    # name too long (CCM 32-char limit, version_behavior_table #3)
+    try:
+        _normalize_solution_fields(
+            [SolutionField(name="x" * 33, data=np.zeros(8))]
+        )
+    except ValueError as exc:
+        assert "limited to 32" in str(exc)
+    else:
+        raise AssertionError("over-long field name must be rejected")
+
+    # wrong data shape
+    try:
+        _normalize_solution_fields(
+            [SolutionField(name="p", data=np.zeros((8, 2)))]
+        )
+    except ValueError as exc:
+        assert "(n,) scalar" in str(exc)
+    else:
+        raise AssertionError("bad data shape must be rejected")
+
+    # short-name truncation to the 8-char prostar slot
+    norm = _normalize_solution_fields(
+        [SolutionField(name="StaticTemperature", data=np.zeros(8))]
+    )
+    assert norm[0].short_name == "StaticTemperature"[:8] == "StaticTe"
+    print("test_solution_fields_validation OK")
+
+
 TESTS = [
     test_write_and_readback,
     test_model_build_parts_and_boundaries,
@@ -1483,6 +1599,8 @@ TESTS = [
     test_periodic_geometry_validation,
     test_periodic_interface_written,
     test_periodic_geometry_rejects_write,
+    test_solution_fields_roundtrip,
+    test_solution_fields_validation,
 ]
 
 

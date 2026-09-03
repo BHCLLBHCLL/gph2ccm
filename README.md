@@ -101,8 +101,10 @@ python -m gph2ccm mesh.gph out.ccm --regions mesh.json
   与拓扑，没有结果场、材料属性、湍流/能量等物理模型。因此场变量、求解
   设置、MRF、周期/滑移配对等信息默认以 `gph2ccm.*` 描述性元数据节点写入
   CCM（见下节），**不会**自动变成 STAR-CCM+ 里生效的物理条件。例外：
-  regions JSON 里的 `periodic` 配对（见下）会做几何匹配校验并写成生效的
-  `InterfaceDefinitions` 节点（C1）。
+  - regions JSON 里的 `periodic` 配对（见下）会做几何匹配校验并写成生效的
+    `InterfaceDefinitions` 节点（C1）；
+  - 通过 API 传入 `solution_fields`（C2）时，**真实 cell 场数据**（标量 /
+    向量）会作为 CCM post data 写入，STAR-CCM+ 导入后可直接用于后处理显示。
 - **单 processor**：只写单一 processor（单分区）网格，不做分区/并行分解。
 - **不修网格**：只做只读质量诊断（`gph2ccm/diagnose.py`），不自动修复退化
   面、未覆盖边界面等问题。
@@ -145,6 +147,31 @@ STAR-CCM+ 导入时会忽略它们，网格不受影响；但可以用
 
 未提供 regions JSON 时，上述 `Field.*` / `Solver.*` / `MRF.*` / `Periodic.*`
 节点不会写出，行为与旧版完全一致。
+
+### 写入真实场数据（C2）
+
+除描述性元数据外，还可以通过 API 把**真实的 cell 中心场数据**写进 CCM
+（作为标准 CCM post data，STAR-CCM+ 导入后直接可用于后处理显示）：
+
+```python
+from gph2ccm.model import build_model, SolutionField
+from gph2ccm.convert import CcmMeshWriter, convert_model
+
+convert_model(
+    mesh, "out.ccm",
+    solution_fields=[
+        SolutionField(name="Pressure", short_name="PRESS",
+                      data=pressure, units="Pa"),          # (n_cells,) 标量
+        SolutionField(name="Velocity", short_name="VELO",
+                      data=velocity),                      # (n_cells, 3) 向量
+    ],
+)
+# 或对已构建的 model：model.solution_fields = [...] 后再 writer.write(...)
+```
+
+约束：名称 ≤ 32 字符、prostar 短名 ≤ 8 字符（向量分量自动占末位 X/Y/Z）、
+仅支持 cell 中心数据；非法声明在转换前 fail-fast 报错。FPH 结果文件的
+自动管线（解析 FlowSolution → 场数据）在后续切片中接入。
 
 ### 读回元数据
 

@@ -16,11 +16,21 @@ from .ccmio import (
     K_CCMIO_BOUNDARY_FACES,
     K_CCMIO_BOUNDARY_REGION,
     K_CCMIO_CELLS,
+    K_CCMIO_CELL,
     K_CCMIO_CELL_TYPE,
+    K_CCMIO_FIELD_PHASE,
+    K_CCMIO_FIELD_SET,
     K_CCMIO_INTERNAL_FACES,
     K_CCMIO_MAP,
+    K_CCMIO_MAX_STRING_LENGTH,
     K_CCMIO_PROBLEM_DESCRIPTION,
+    K_CCMIO_PROSTAR_SHORT_NAME_LENGTH,
+    K_CCMIO_SCALAR,
     K_CCMIO_TOPOLOGY,
+    K_CCMIO_VECTOR,
+    K_CCMIO_VECTOR_X,
+    K_CCMIO_VECTOR_Y,
+    K_CCMIO_VECTOR_Z,
     K_CCMIO_VERTICES,
 )
 from .deps import import_gph2cgns
@@ -615,9 +625,9 @@ class CcmMeshWriter:
         * ``mrf``            -> ``gph2ccm.MRF.<name>``    (rotating reference frame)
         * ``periodic``      -> ``gph2ccm.Periodic.<name>`` (interface pairing)
 
-        Each group also gets a ``*Names`` / ``*Keys`` index list.  This is
-        reference metadata only -- gph2ccm never writes actual solution data
-        or turns itself into a solver-ready exporter (keep-boundary scope).
+        Each group also gets a ``*Names`` / ``*Keys`` index list.  These stay
+        descriptive; actual solution data is written separately by
+        ``_write_solution_fields`` (C2) from ``model.solution_fields``.
         """
         if not (model.fields or model.solver_settings or model.mrf or model.periodic):
             return
@@ -1026,9 +1036,9 @@ class CcmMeshWriter:
 
         # -- descriptive field / solver metadata (optional, data-driven) ------
         # Carries the user's field/solver intent from the regions JSON into the
-        # .ccm as namespaced descriptive opt nodes.  This is reference metadata
-        # only -- gph2ccm never writes actual solution field data or turns
-        # itself into a solver-ready exporter (keep-boundary scope decision).
+        # .ccm as namespaced descriptive opt nodes.  These stay reference-only;
+        # actual solution data goes through _write_solution_fields (C2) instead,
+        # driven by an explicit model.solution_fields declaration.
         self._write_metadata_nodes(problem, model)
 
         # -- capability / limitation notes (informational) --------------------
@@ -1037,7 +1047,85 @@ class CcmMeshWriter:
         self._write_quality_note(problem, model, ld)
 
         ccmio.write_state(state, problem, "gph2ccm")
-        ccmio.write_processor(processor, vertices_node, topology)
+        solution_fieldset = self._write_solution_fields(root, model, cell_map)
+        ccmio.write_processor(
+            processor, vertices_node, topology, solution=solution_fieldset
+        )
+
+    def _write_solution_fields(self, root, model: CcmModel, cell_map) -> Optional[object]:
+        """Write ``model.solution_fields`` as real CCM post data (C2).
+
+        Structure follows the official libccmio ``writeexample.cpp``::
+
+            FieldSet  (root child, becomes the processor's solution slot)
+              FieldPhase 0..N  (indexed)
+                Field  (name + prostar short name + dimensionality)
+                  FieldData  (float32 per-cell values, keyed by cell map)
+            vector fields: one scalar sub-field per X/Y/Z component, linked
+            with CCMIOWriteMultiDimensionalFieldData.
+
+        Returns the FieldSet CCMIOID (or ``None`` when there is nothing to
+        write, leaving the processor's solution slot untouched).
+        """
+        if not model.solution_fields:
+            return None
+        ccmio = self.ccmio
+        fieldset = ccmio.new_entity(root, K_CCMIO_FIELD_SET, "gph2ccm solution")
+        phases: dict[int, object] = {}
+        n_written = 0
+        for i, sf in enumerate(model.solution_fields):
+            data = np.asarray(sf.data, dtype=np.float64)
+            if data.ndim == 1 and data.shape[0] != model.n_cells:
+                raise ValueError(
+                    f"solution_fields[{i}] ({sf.name!r}): data has "
+                    f"{data.shape[0]} values but the mesh has {model.n_cells} cells"
+                )
+            if data.ndim == 2 and (data.shape[0] != model.n_cells or data.shape[1] != 3):
+                raise ValueError(
+                    f"solution_fields[{i}] ({sf.name!r}): vector data must be "
+                    f"({model.n_cells}, 3), got {data.shape}"
+                )
+            phase = phases.get(sf.phase)
+            if phase is None:
+                phase = ccmio.new_indexed_entity(
+                    fieldset, K_CCMIO_FIELD_PHASE, sf.phase
+                )
+                phases[sf.phase] = phase
+
+            if data.ndim == 2:
+                # Vector: X/Y/Z scalar component sub-fields (official pattern).
+                # Short names must be unique inside the field set; reserve the
+                # last character of the 8-char prostar slot for X/Y/Z.
+                vfield = ccmio.new_field(
+                    phase, sf.name, sf.short_name, K_CCMIO_VECTOR
+                )
+                base = sf.short_name[: K_CCMIO_PROSTAR_SHORT_NAME_LENGTH - 1]
+                for comp, suffix in (
+                    (K_CCMIO_VECTOR_X, "X"),
+                    (K_CCMIO_VECTOR_Y, "Y"),
+                    (K_CCMIO_VECTOR_Z, "Z"),
+                ):
+                    comp_field = ccmio.new_field(
+                        phase,
+                        f"{sf.name} ({suffix})"[:K_CCMIO_MAX_STRING_LENGTH],
+                        f"{base}{suffix}",
+                        K_CCMIO_SCALAR,
+                    )
+                    ccmio.write_field_dataf(
+                        comp_field, cell_map, K_CCMIO_CELL, data[:, comp]
+                    )
+                    ccmio.link_vector_component(vfield, comp, comp_field)
+            else:
+                sfield = ccmio.new_field(
+                    phase, sf.name, sf.short_name, K_CCMIO_SCALAR
+                )
+                ccmio.write_field_dataf(sfield, cell_map, K_CCMIO_CELL, data)
+            n_written += 1
+        self._log(
+            f"[gph2ccm] wrote {n_written} solution field(s) "
+            f"in {len(phases)} phase(s) (C2)"
+        )
+        return fieldset
 
 
 def convert_gph(
@@ -1100,6 +1188,7 @@ def convert_model(
     split_regions: bool = False,
     verify: bool = False,
     force_material: Optional[str] = None,
+    solution_fields: Optional[list] = None,
     verbose: bool = True,
 ) -> Path:
     """Convert a parsed GPH ``mesh`` dict to a ``.ccm`` file."""
@@ -1121,6 +1210,7 @@ def convert_model(
         solver_settings=regions.get("solver_settings") if regions else None,
         mrf=regions.get("mrf") if regions else None,
         periodic=regions.get("periodic") if regions else None,
+        solution_fields=solution_fields,
     )
     if verbose:
         extra = ""
