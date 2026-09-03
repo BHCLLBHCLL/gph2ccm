@@ -52,3 +52,14 @@ def import_gph2cgns() -> ModuleType:
     _ensure_on_path(root)
     return importlib.import_module("gph2cgns")
 
+
+def import_fph2cgns() -> ModuleType:
+    """Import ``fph2cgns`` (FPH result-file parser) from the gphdecoding tree.
+
+    Requires ``h5py`` on the import path (fph2cgns hard-checks it); callers
+    should surface the ImportError with a pointer to ``pip install h5py``.
+    """
+    root = find_gphdecoding_root()
+    _ensure_on_path(root)
+    return importlib.import_module("fph2cgns")
+

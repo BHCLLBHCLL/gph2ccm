@@ -150,12 +150,27 @@ STAR-CCM+ 导入时会忽略它们，网格不受影响；但可以用
 
 ### 写入真实场数据（C2）
 
-除描述性元数据外，还可以通过 API 把**真实的 cell 中心场数据**写进 CCM
-（作为标准 CCM post data，STAR-CCM+ 导入后直接可用于后处理显示）：
+除描述性元数据外，还可以把**真实的 cell 中心场数据**写进 CCM（作为标准
+CCM post data，STAR-CCM+ 导入后直接可用于后处理显示）。两种来源：
+
+**a. FPH 结果文件（自动管线）**——FPH（`CRDL-FLD`）是 GPH 的超集，自带
+`LS_SPHFile` 求解结果段。直接把 `.fph` 当输入，网格与结果场一次转换：
+
+```bash
+python -m gph2ccm results.fph out.ccm           # 网格+结果场同文件
+python -m gph2ccm mesh.gph out.ccm --fph results.fph   # 网格与结果分离时
+```
+
+变量自动分组：标量（`PRES`/`TURK`/`TEPS`/`EVIS`/`TPRS` 等）原样写入；
+向量分量（`VELX/VELY/VELZ`）重组为 `(n,3)` 向量场（`VEL`）；哨兵值
+（|v| > 1e20）清零。需要 `h5py`（`pip install h5py`）。
+
+**b. API 供数**——任何来源的场数据（CGNS/CSV/自算）经 `solution_fields`
+传入：
 
 ```python
 from gph2ccm.model import build_model, SolutionField
-from gph2ccm.convert import CcmMeshWriter, convert_model
+from gph2ccm.convert import convert_model
 
 convert_model(
     mesh, "out.ccm",
@@ -166,12 +181,10 @@ convert_model(
                       data=velocity),                      # (n_cells, 3) 向量
     ],
 )
-# 或对已构建的 model：model.solution_fields = [...] 后再 writer.write(...)
 ```
 
 约束：名称 ≤ 32 字符、prostar 短名 ≤ 8 字符（向量分量自动占末位 X/Y/Z）、
-仅支持 cell 中心数据；非法声明在转换前 fail-fast 报错。FPH 结果文件的
-自动管线（解析 FlowSolution → 场数据）在后续切片中接入。
+仅支持 cell 中心数据；非法声明或场数据与网格单元数不一致均 fail-fast 报错。
 
 ### 读回元数据
 

@@ -115,7 +115,11 @@ def main(argv: list[str] | None = None) -> int:
         prog="python -m gph2ccm",
         description="Convert Software Cradle GPH meshes to STAR-CCM+ CCM files.",
     )
-    parser.add_argument("gph", help="input Cradle mesh file (*.gph)")
+    parser.add_argument(
+        "gph",
+        help="input Cradle mesh file (*.gph, or *.fph to also import its "
+        "solver result fields)",
+    )
     parser.add_argument(
         "output",
         nargs="?",
@@ -132,6 +136,13 @@ def main(argv: list[str] | None = None) -> int:
         metavar="JSON",
         help='optional JSON mapping boundary region names to CCM BoundaryType '
         'strings, e.g. {"inlet_1": "inlet"}',
+    )
+    parser.add_argument(
+        "--fph",
+        metavar="FPH",
+        help="optional FPH result file (CRDL-FLD) from the same run; its "
+        "LS_SPHFile solver fields are written as real CCM post data "
+        "(requires h5py). Unnecessary when the input itself is a .fph file.",
     )
     parser.add_argument(
         "--ccmio-dll",
@@ -220,6 +231,7 @@ def main(argv: list[str] | None = None) -> int:
             args.output,
             regions_json=args.regions,
             boundary_types_json=args.boundary_types,
+            fph_path=args.fph,
             ccmio_dll=args.ccmio_dll,
             compress=not args.no_compress,
             backup=args.backup,

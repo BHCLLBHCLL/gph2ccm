@@ -407,11 +407,15 @@ def build_model(
         solver_settings=dict(solver_settings) if solver_settings else {},
         mrf=list(mrf) if mrf else [],
         periodic=list(periodic) if periodic else [],
-        solution_fields=_normalize_solution_fields(solution_fields),
+        solution_fields=_normalize_solution_fields(
+            solution_fields, n_cells=int(cell_types.size)
+        ),
     )
 
 
-def _normalize_solution_fields(raw: Optional[list]) -> list[SolutionField]:
+def _normalize_solution_fields(
+    raw: Optional[list], n_cells: Optional[int] = None
+) -> list[SolutionField]:
     """Coerce ``solution_fields`` entries to validated :class:`SolutionField`.
 
     Fail-fast validation happens here (before any output exists):
@@ -461,6 +465,12 @@ def _normalize_solution_fields(raw: Optional[list]) -> list[SolutionField]:
             raise ValueError(
                 f"solution_fields[{i}] ({f.name!r}): data must be (n,) scalar "
                 f"or (n, 3) vector, got shape {data.shape}"
+            )
+        if n_cells is not None and data.shape[0] != n_cells:
+            raise ValueError(
+                f"solution_fields[{i}] ({f.name!r}): data has "
+                f"{data.shape[0]} values but the mesh has {n_cells} cells "
+                "(e.g. .fph and mesh from different runs)"
             )
         out.append(
             SolutionField(

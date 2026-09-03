@@ -1571,6 +1571,99 @@ def test_solution_fields_validation() -> None:
     print("test_solution_fields_validation OK")
 
 
+def test_fph_field_grouping() -> None:
+    """C2 slice 2: fph2cgns flow_solution -> SolutionField grouping logic."""
+    from gph2ccm.fph_fields import (
+        group_flow_solution,
+        solution_fields_from_flow_solution,
+    )
+
+    fs = {
+        "PRES": np.array([1.0, 2.0, 3.0, 4.0]),
+        "VELX": np.array([1.0, 1.0, 1.0, 1.0]),
+        "VELY": np.array([2.0, 2.0, 2.0, 2.0]),
+        "VELZ": np.array([3.0, 3.0, 3.0, 3.0]),
+        # trailing X with missing siblings -> stays scalar
+        "ORPHANX": np.zeros(4),
+        # sentinel values -> clipped to 0
+        "TURB": np.array([0.1, 1e30, -1e30, 0.2]),
+    }
+    scalars, vectors = group_flow_solution(fs)
+    assert set(scalars) == {"PRES", "ORPHANX", "TURB"}
+    assert set(vectors) == {"VEL"}
+    np.testing.assert_array_equal(vectors["VEL"][:, 0], [1, 1, 1, 1])
+    np.testing.assert_array_equal(vectors["VEL"][:, 2], [3, 3, 3, 3])
+
+    fields = solution_fields_from_flow_solution(fs, n_cells=4)
+    by_name = {f.name: f for f in fields}
+    assert set(by_name) == {"PRES", "ORPHANX", "TURB", "VEL"}
+    # sentinel clipped
+    np.testing.assert_array_equal(by_name["TURB"].data, [0.1, 0.0, 0.0, 0.2])
+    # vector shape
+    assert by_name["VEL"].data.shape == (4, 3)
+
+    # cell-count mismatch fails fast with a clear message
+    try:
+        solution_fields_from_flow_solution(fs, n_cells=99)
+    except ValueError as exc:
+        assert "different runs" in str(exc)
+    else:
+        raise AssertionError("cell-count mismatch must be rejected")
+    print("test_fph_field_grouping OK")
+
+
+def test_fph_end_to_end_sample() -> None:
+    """C2 slice 2 end-to-end on a real FPH sample (skipped when absent).
+
+    Uses the small ``tr03_9.fph`` (63,697 cells) from the sibling examples
+    directory; converts the FPH mesh+results to a .ccm and reads the fields
+    back through the CCMIO API.
+    """
+    sample = (
+        Path(__file__).resolve().parent.parent.parent
+        / "examples"
+        / "tr03_9.fph"
+    )
+    if not sample.is_file():
+        raise _skip(f"FPH sample not available: {sample}")
+
+    from gph2ccm.convert import convert_gph
+    from gph2ccm.ccmio import (
+        K_CCMIO_FIELD,
+        K_CCMIO_FIELD_PHASE,
+        K_CCMIO_FIELD_SET,
+        K_CCMIO_VECTOR,
+    )
+
+    ccmio = _require_ccmio()
+    with tempfile.TemporaryDirectory(prefix="gph2ccm_fph_") as tmp:
+        out = Path(tmp) / "tr03.ccm"
+        convert_gph(sample, out, verbose=False)
+        ccmio.compress(out)
+
+        root = ccmio.open_file_readonly(out)
+        try:
+            fieldset = ccmio.next_entity(root, K_CCMIO_FIELD_SET, 0)
+            assert fieldset is not None, "no solution FieldSet written"
+            phase = ccmio.next_entity(fieldset, K_CCMIO_FIELD_PHASE, 0)
+            assert phase is not None
+            names = []
+            i = 0
+            while True:
+                f = ccmio.next_entity(phase, K_CCMIO_FIELD, i)
+                if f is None:
+                    break
+                names.append(ccmio.read_field(f)[0])
+                i += 1
+            # PRES/TURK/TEPS/EVIS/TPRS scalars + VEL vector + LNAM_RV001 vector
+            for expected in ("PRES", "TURK", "TEPS", "EVIS", "TPRS", "VEL"):
+                assert expected in names, (expected, sorted(names))
+            assert "VELX" not in names  # components folded into VEL
+        finally:
+            ccmio.close_file(root)
+    print("test_fph_end_to_end_sample OK")
+
+
 TESTS = [
     test_write_and_readback,
     test_model_build_parts_and_boundaries,
@@ -1601,6 +1694,8 @@ TESTS = [
     test_periodic_geometry_rejects_write,
     test_solution_fields_roundtrip,
     test_solution_fields_validation,
+    test_fph_field_grouping,
+    test_fph_end_to_end_sample,
 ]
 
 

@@ -72,11 +72,24 @@ def load_boundary_types(path: Optional[str | Path]) -> dict[str, str]:
 
 
 def parse_gph(gph_path: str | Path, verbose: bool = True) -> dict:
-    gph2cgns = import_gph2cgns()
-    t0 = time.perf_counter()
-    if verbose:
-        print(f"[gph2ccm] reading GPH: {gph_path}")
-    mesh = gph2cgns.parse_gph_mesh(str(gph_path))
+    gph_path = Path(gph_path)
+    if gph_path.suffix.lower() == ".fph":
+        # FPH = GPH superset: same mesh sections plus LS_SPHFile results.
+        # Parsed with fph2cgns so mesh["flow_solution"] is populated and the
+        # single-file FPH -> CCM flow works end to end.
+        from .deps import import_fph2cgns
+
+        fph2cgns = import_fph2cgns()
+        t0 = time.perf_counter()
+        if verbose:
+            print(f"[gph2ccm] reading FPH: {gph_path}")
+        mesh = fph2cgns.parse_gph_mesh(str(gph_path))
+    else:
+        gph2cgns = import_gph2cgns()
+        t0 = time.perf_counter()
+        if verbose:
+            print(f"[gph2ccm] reading GPH: {gph_path}")
+        mesh = gph2cgns.parse_gph_mesh(str(gph_path))
     if mesh.get("vertices") is None or mesh.get("link_data") is None:
         raise RuntimeError(f"failed to extract mesh from {gph_path}")
     ld = mesh["link_data"]
@@ -1134,6 +1147,7 @@ def convert_gph(
     *,
     regions_json: Optional[str | Path] = None,
     boundary_types_json: Optional[str | Path] = None,
+    fph_path: Optional[str | Path] = None,
     ccmio_dll: Optional[str | Path] = None,
     compress: bool = True,
     backup: bool = False,
@@ -1146,11 +1160,26 @@ def convert_gph(
     force_material: Optional[str] = None,
     verbose: bool = True,
 ) -> Path:
-    """Convert a Cradle ``.gph`` mesh to a STAR-CCM+ legacy ``.ccm`` file."""
+    """Convert a Cradle ``.gph`` mesh to a STAR-CCM+ legacy ``.ccm`` file.
+
+    ``fph_path`` optionally points at an FPH result file (``CRDL-FLD``) from
+    the same run; its ``LS_SPHFile`` solver fields are written as real CCM
+    post data (C2).  A ``.fph`` input file carries both mesh and results, so
+    ``--fph`` is unnecessary in that case.
+    """
     gph_path = Path(gph_path).resolve()
     if not gph_path.is_file():
         raise FileNotFoundError(gph_path)
     mesh = parse_gph(gph_path, verbose=verbose)
+    if fph_path is not None:
+        from .fph_fields import load_fph_flow_solution
+
+        fph_path = Path(fph_path).resolve()
+        if not fph_path.is_file():
+            raise FileNotFoundError(fph_path)
+        # Only the solution part is taken from the FPH here; the cell count
+        # is validated against the converted mesh at build_model time.
+        mesh["flow_solution"] = load_fph_flow_solution(fph_path, verbose=verbose)
     if out_path is None:
         out_path = gph_path.with_suffix(".ccm")
     return convert_model(
@@ -1198,6 +1227,20 @@ def convert_model(
 
     if boundary_types is None and regions and "boundary_types" in regions:
         boundary_types = {str(k): str(v) for k, v in regions["boundary_types"].items()}
+
+    # C2 slice 2: an FPH-sourced mesh dict carries flow_solution; derive
+    # SolutionFields from it unless the caller supplied their own.
+    if solution_fields is None and mesh.get("flow_solution"):
+        from .fph_fields import solution_fields_from_flow_solution
+
+        solution_fields = solution_fields_from_flow_solution(
+            mesh["flow_solution"]
+        )
+        if verbose:
+            print(
+                f"[gph2ccm] FPH result data: {len(solution_fields)} "
+                "solution field(s) will be written (C2)"
+            )
 
     if reorder:
         mesh = apply_mesh_reorder(mesh, reorder, verbose=verbose)
