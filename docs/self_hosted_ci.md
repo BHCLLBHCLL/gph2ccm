@@ -177,6 +177,9 @@ Write-Host "done. status:"; .\svc.cmd status
 
 ## 验证清单
 
+> 其余需要人工执行的验证（GUI 导入检查、周期界面生效确认、宏数值确认、
+> 版本升级复核等）见 `docs/manual_verification.md`。
+
 1. Actions 页面 **Settings → Actions → Runners**：runner 处于 `Idle`，标签含
    `windows`、`starccm`（外加自动的 `self-hosted`）。
 2. 手动触发一次：**Actions → self-hosted → Run workflow → Run workflow**。
