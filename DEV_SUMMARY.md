@@ -24,16 +24,22 @@
 
 ```
 gph2ccm/
-  deps.py      # 定位并导入同级 gphdecoding（GPH 解析）
-  ccmio.py     # ctypes 绑定 ccmio.dll / libccmio（CCM 读写 API）
-  model.py     # GPH -> CCM 网格模型（单元、面、边界、接口）
-  convert.py   # 编排：模型组装 + CCMIO 写入 + 压缩 + 校验
+  deps.py      # 定位并导入同级 gphdecoding（GPH/FPH 解析）
+  ccmio.py     # ctypes 绑定 ccmio.dll / libccmio（CCM 读写 API，含 Field API）
+  model.py     # GPH -> CCM 网格模型（单元、面、边界、接口、解算场）
+  convert.py   # 编排：模型组装 + CCMIO 写入 + 压缩 + 校验 + 元数据/场数据
+  fph_fields.py# FPH 结果文件 -> SolutionField（标量/向量分组 + 哨兵清零）
+  regions_schema.py # regions JSON 校验（非法键/超长名早失败）
+  inspect.py   # `inspect` 子命令：读回 gph2ccm.* 元数据（B1）
+  macro.py     # STAR-CCM+ Java 设置宏生成器（B2）
+  diagnose.py  # 网格质量诊断 API + 分级输出（B4）
   reorder.py   # RCM 单元重排（可选）
   verify.py    # 读回一致性校验
-  __main__.py  # CLI
+  __main__.py  # CLI（convert 默认 / inspect / macro）
 tools/
   dump_ccm.py            # CCM 实体树/结构转储（对比诊断）
   topo_check.py          # 拓扑健康检查（单元面数/退化面/闭合性）
+  benchmark.py           # 性能基线（合成块计时 + 内存峰值，D3）
   make_two_region_ccm.py # 合成两 fluid region 验证网格
   make_demo_ccm.py       # 合成笛卡尔六面体演示网格
   extract_subset.py      # 从真实 GPH 提取子网格
@@ -217,19 +223,30 @@ Cradle 会把同一组物理面导出到多个 `LS_SurfaceRegions`（如 `open` 
 - `--cell-topology`（poly=255）、`--reorder rcm`、`--verify`、压缩；
 - `--split-fluid-regions`：多 fluid region + `[Interface N]` +
   `InterfaceDefinitions`；
+- **描述性元数据**（regions JSON 驱动）：`gph2ccm.Field.* / Solver.* /
+  MRF.* / Periodic.* / BC.* / Qual.* / Note.*` 命名空间节点 +
+  `gph2ccm inspect` 读回报告（B1）+ Java 设置宏生成器（B2）；
+- **周期/滑移配对生效**（C1）：几何匹配校验（fail-fast）后写
+  `InterfaceDefinitions`（`PeriodicInterface`）；
+- **真实场数据写入**（C2）：`solution_fields` API 或 **FPH 结果文件**
+  （`.fph` 输入 / `--fph` 附加）→ FieldSet/FieldPhase/Field/FieldData
+  写入 processor solution 槽，标量/向量自动分组 + 哨兵清零；
+  6.8M 单元真实网格端到端验证（见 `docs/performance_baseline.md`）。
 
 ### 限制 / 已知问题
 
-- 只写网格与问题描述，不写结果场/求解设置（MRF、边界条件等需在
-  STAR-CCM+ 中补充）；
+- 求解级物理（湍流模型、材料属性、MRF 生效条件、非周期边界条件）仍需
+  在 STAR-CCM+ 中补充：legacy CCM 无对应导入语义，B2 宏生成器为现行方案；
+- 多 processor / 分布式分区不支持（legacy CCM 单 processor 固有限制，
+  C3 可行性结论：无导入侧需求证据前维持单 processor + 自说明）；
 - 顶点仅 float32（CCM 格式限制），大坐标网格存在精度上限；
-- `--chunk-vertices` 因 2D 分块 bug 实际不生效（见
-  `conversion_issues_analysis.md` M1）；
-- `verify_ccm` 在 split 模式对 interface 两侧共享物理面会误报重复
-  （H1），`write()` 异常时缺少 finally 清理（M4）等代码质量问题已单独
-  记录，待按优先级修复；
-- interface 虚拟 face id 的 `max_id` 语义（H2）建议后续与 STAR-CCM+
-  原生导出再核对。
+- 高阶（二次）单元不可行（格式链两端均无高阶语义，见评估文档 D4）；
+- 场数据仅支持 cell 中心位置（legacy CCM post data 惯例）；vertex 场
+  未实现。
+
+> 历史问题 M1（--chunk-vertices 失效）、M4（write 异常安全）、H1（verify
+> split 误报）、L3（质心体积加权）、B1/B3/B4 均已修复/交付，详见
+> `gph2ccm_functional_assessment.md` 与 `conversion_issues_analysis.md`。
 
 ---
 
