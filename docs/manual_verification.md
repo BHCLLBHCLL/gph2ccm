@@ -20,6 +20,14 @@
 | M6 | 性能基线复核 | 换机/换版本/疑似回归 | 本机 ccmio.dll |
 | M7 | STAR-CCM+ 版本升级行为表复核 | 升级 STAR-CCM+ 后 | 新版本安装 |
 
+## 验证记录（实际执行过的 M2/M6 证据）
+
+- **2026-09-04 · M2 + C2 全流程**：`laptop_thermal_steady_scaled_v3_10.fph`
+  （1.36 GB）→ 6,831,117 cells + 10 个解算场 → `IMPORT_DONE`，区域/边界/单元
+  数与源逐项一致，导入器自动创建 Interface-1-2。详见
+  `docs/performance_baseline.md`「真实 FPH 端到端记录」。批次内 `wmic.exe`
+  被安全策略拦截（行为表 #11），发生在宏完成后、不影响结果。
+
 ---
 
 ## M1 — self-hosted runner 注册与全量套件

@@ -32,6 +32,35 @@ Python 3.13（managed）。
 > `tools/laptop_topo.json`），与 `--n 149` 的合成块同数量级，故合成块基线
 > 可作为其量级参考。
 
+## 真实 FPH 端到端记录（2026-09-04，C2 全流程验证）
+
+输入 `laptop_thermal_steady_scaled_v3_10.fph`（1.36 GB，Cradle scFLOW 结果
+文件，网格 + `LS_SPHFile` 求解数据），`python -m gph2ccm <fph> out.ccm --verify`：
+
+| 阶段 | 耗时 | 说明 |
+|---|---|---|
+| FPH 解析（mmap） | 104.9 s | 6,831,117 cells / 7,723,969 verts / 21,389,752 faces |
+| CCM 写出 | 22.1 s | 含 **10 个解算场**（7 标量 + 3 向量 ×3 分量，16 组 cell 数据 × 6.8M float32 ≈ 437 MB） |
+| compress + verify | 其余 | 输出 **1330.5 MB**；verify 读回全部一致 |
+| **端到端合计** | **2 m 41 s** | 单命令 `--verify` 内完成 |
+
+场数据读回比对：16 个 FPH 变量的 min 值逐场精确一致；7 个变量含
+`1e20` 哨兵值，CCM 侧全部清零（max 恢复物理范围，如 PRES 1e20→68.16、
+TURK→0.00768）。
+
+STAR-CCM+ 20.02.007-R8 batch 导入（`ImportCcmCheck.java`，license
+`ccmpsuite` 正常检出，约 3 min）：
+
+- `IMPORT_DONE`；区域 `air_domain`（6,183,269 cells）+ `case2`
+  （647,848 cells）＝ **6,831,117 与源精确一致**；
+- 边界 `open` 17,746 / `impeller1_s` 113,933 / `impeller2_s` 113,933
+  ＝ **245,612 与源一致**；
+- 导入器自动创建 **Interface-1-2**（两侧各 516,906 面，fluid/solid 共轭
+  界面）——多材料网格的区域/界面语义被正确识别。
+
+此记录同时是「真实 6.8M 单元 + 场数据」的回归参照：后续改写路径后，
+parse/write 耗时偏离此量级 >30% 需排查。
+
 ## 复跑
 
 ```bash
