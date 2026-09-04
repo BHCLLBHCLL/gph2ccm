@@ -1234,6 +1234,60 @@ def test_macro_generation() -> None:
     print("test_macro_generation OK")
 
 
+def test_macro_bc_values_applied() -> None:
+    """E3: known BC params become real Profile.setValue calls; solver
+    settings and unknown params stay println reminders."""
+    from gph2ccm.macro import generate_macro, generate_macro_for_file
+
+    ccmio = _require_ccmio()
+    with tempfile.TemporaryDirectory(prefix="gph2ccm_e3_") as tmp:
+        out = Path(tmp) / "meta.ccm"
+        _write_full_metadata_case(ccmio, out)
+
+        src = generate_macro_for_file(out, ccm_path=None)
+        # Known numeric params -> real API (javap-verified against 2502).
+        assert (
+            "((star.flow.VelocityMagnitudeProfile) b.getValues()"
+            ".getCondition(star.flow.VelocityMagnitudeProfile.class))"
+            ".setValue(5.0);" in src
+        ), "velocity magnitude not applied"
+        assert (
+            "((star.flow.StaticPressureProfile) b.getValues()"
+            ".getCondition(star.flow.StaticPressureProfile.class))"
+            ".setValue(0.0);" in src
+        ), "static pressure not applied"
+        assert "// E3: 以下 BC 数值已通过 Profile.setValue 自动应用：" in src
+        assert "inlet.velocity = 5.0" in src
+        # Solver metadata (free-form) stays a reminder.
+        assert 'gph2ccm TODO solver: steady = True' in src
+
+    # Reminder paths need no file: unknown param key / non-numeric value.
+    meta = {
+        "file": "unit",
+        "fields": [],
+        "solver_settings": {},
+        "mrf": [],
+        "periodic": [],
+        "boundary_conditions": [
+            {
+                "label": "inlet",
+                "type": "inlet",
+                "params": {
+                    "velocity": "15 m/s",  # known key, not a plain number
+                    "swirl": 30.0,  # unknown key
+                },
+            },
+        ],
+        "notes": {},
+        "quality": {},
+    }
+    src2 = generate_macro(meta, ccm_path=None)
+    assert "getCondition" not in src2, "non-numeric must not be applied"
+    assert "gph2ccm TODO: boundary inlet: velocity = 15 m/s" in src2
+    assert "gph2ccm TODO: boundary inlet: swirl = 30.0" in src2
+    print("test_macro_bc_values_applied OK")
+
+
 # -- C1: periodic pairings become effective -----------------------------------
 
 def _periodic_fixture_model():
@@ -1765,6 +1819,7 @@ TESTS = [
     test_inspect_report_checklist,
     test_cell_centroids_area_weighted,
     test_macro_generation,
+    test_macro_bc_values_applied,
     test_periodic_geometry_validation,
     test_periodic_interface_written,
     test_periodic_geometry_rejects_write,

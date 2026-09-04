@@ -8,19 +8,34 @@ Java macro that applies the recorded intent to the imported simulation:
 * MRF rotating reference frames (``UserRotatingReferenceFrame`` + assignment
   through ``MotionSpecification``, following the official Simcenter STAR-CCM+
   2502 journal recipes);
-* periodic / sliding pairings (direct interfaces between the two boundaries).
+* periodic / sliding pairings (direct interfaces between the two boundaries);
+* **E3**: known boundary-condition *values* (velocity magnitude, static /
+  total pressure, static / total temperature, turbulence intensity,
+  turbulent viscosity ratio, mass flow rate) are applied for real through
+  ``getValues().getCondition(<Profile>.class).setValue(<number>)``;
+  anything not in the map stays a ``println`` reminder.
 
-The macro is deliberately a **template**: numeric boundary-condition values
-are emitted as comments/println reminders for the user to confirm, and every
-generated statement is wrapped in its own ``try/catch`` so a missing region
-or boundary never aborts the batch run.
+The macro is deliberately a **template**: solver settings (``gph2ccm.Solver.*``
+metadata is free-form key/value) are emitted as ``println`` reminders for the
+user to confirm, and every generated statement is wrapped in its own
+``try/catch`` so a missing region or boundary never aborts the batch run.
 
 API names were verified against the local STAR-CCM+ 20.02.007-R8 (2502)
-installation:
+installation (javap over ``starbase.jar`` / ``flow.jar`` / ``energy.jar`` /
+``turbulence.jar``):
 
 * ``Boundary.setBoundaryType(Class<? extends BoundaryType>)`` -- starbase.jar;
 * ``InletBoundary`` / ``PressureBoundary`` / ... -- ``star.common`` (the
   UserGuide's own example uses ``boundary.setBoundaryType(InletBoundary.class)``);
+* ``ModelPart.getValues()`` -> ``PhysicsValueManager`` +
+  ``ConditionManager.getCondition(Class<T>)`` -- starbase.jar;
+* ``ScalarProfile.setValue(double)`` -- starbase.jar (scalar profile base);
+* ``star.flow.VelocityMagnitudeProfile`` / ``StaticPressureProfile`` /
+  ``TotalPressureProfile`` / ``MassFlowRateProfile`` -- flow.jar;
+* ``star.energy.StaticTemperatureProfile`` / ``TotalTemperatureProfile`` --
+  energy.jar;
+* ``star.turbulence.TurbulenceIntensityProfile`` /
+  ``TurbulentViscosityRatioProfile`` -- turbulence.jar;
 * ``ReferenceFrameManager.createReferenceFrame(Class, String)``,
   ``RotatingReferenceFrame.getRotationRate()`` / ``getAxis()`` / ``getOrigin()``
   -- motion.jar;
@@ -58,6 +73,44 @@ BCTYPE_TO_JAVA: dict[str, str] = {
 
 _SKIP_TYPES = {"periodic", "cyclic", "slide", "interface", "couple", "blank",
                "dissolve"}
+
+#: E3: normalized ``gph2ccm.BC.<key>`` param name -> fully-qualified scalar
+#: profile class whose ``setValue(double)`` applies the number in STAR-CCM+.
+#: Keys are matched case-insensitively after stripping ``_``/``-``/spaces.
+#: Classes verified with javap against the local 2502 install (see module
+#: docstring).  Params not in this map remain ``println`` reminders.
+BC_PARAM_TO_PROFILE: dict[str, str] = {
+    "velocity": "star.flow.VelocityMagnitudeProfile",
+    "velocitymagnitude": "star.flow.VelocityMagnitudeProfile",
+    "staticpressure": "star.flow.StaticPressureProfile",
+    "pressure": "star.flow.StaticPressureProfile",
+    "totalpressure": "star.flow.TotalPressureProfile",
+    "stagnationpressure": "star.flow.TotalPressureProfile",
+    "statictemperature": "star.energy.StaticTemperatureProfile",
+    "temperature": "star.energy.StaticTemperatureProfile",
+    "totaltemperature": "star.energy.TotalTemperatureProfile",
+    "stagnationtemperature": "star.energy.TotalTemperatureProfile",
+    "turbulenceintensity": "star.turbulence.TurbulenceIntensityProfile",
+    "intensity": "star.turbulence.TurbulenceIntensityProfile",
+    "turbulentviscosityratio": "star.turbulence.TurbulentViscosityRatioProfile",
+    "viscosityratio": "star.turbulence.TurbulentViscosityRatioProfile",
+    "massflow": "star.flow.MassFlowRateProfile",
+    "massflowrate": "star.flow.MassFlowRateProfile",
+}
+
+
+def _norm_param_key(key: str) -> str:
+    """Normalize a BC param key for the ``BC_PARAM_TO_PROFILE`` lookup."""
+    return re.sub(r"[\s_\-]+", "", str(key)).lower()
+
+
+def _parse_number(value) -> Optional[float]:
+    """Return the float behind *value*, or ``None`` if it is not a plain
+    number (e.g. ``"15 m/s"`` or a named expression) -- those stay reminders."""
+    try:
+        return float(str(value).strip())
+    except (TypeError, ValueError):
+        return None
 
 
 def _jstr(value: str) -> str:
@@ -143,7 +196,8 @@ def generate_macro(
     add("//   2) 批处理：starccm+ -batch " + cls + ".java model.sim")
     add("//      或全新会话（自动导入体网格）：starccm+ -new -batch " + cls + ".java")
     add("//")
-    add("// 半自动模板：边界类型 / MRF / 周期配对自动创建；边界数值仍需人工确认。")
+    add("// 半自动模板（E3）：边界类型 / MRF / 周期配对自动创建；已知 BC 数值经")
+    add("// Profile.setValue 自动应用，其余（含 Solver.* 元数据）为 println 提醒。")
     add("// 每段语句独立 try/catch：缺少对应 region/boundary 时打印告警并继续。")
     add("// ---------------------------------------------------------------------------")
     add("")
@@ -203,16 +257,50 @@ def generate_macro(
                 add(f"    //   - {label}")
             add("")
 
-    # -- boundary condition parameters (comments / reminders) -----------------
-    paramed = [b for b in bcs if b.get("params")]
-    if paramed:
-        add("    // ---- 边界条件数值（仅提醒，需人工确认） ----")
-        for b in paramed:
-            for k, v in b["params"].items():
+    # -- boundary condition values (E3: known params applied for real) --------
+    applied: list[str] = []
+    for b in bcs:
+        params = b.get("params") or {}
+        for k, v in params.items():
+            profile = BC_PARAM_TO_PROFILE.get(_norm_param_key(k))
+            num = _parse_number(v) if profile else None
+            if profile and num is not None:
+                label = b["label"]
+                stmts = [
+                    "Boundary b = findBoundary(simulation_0, "
+                    f"{_jstr(label)});",
+                    f"(({profile}) b.getValues()"
+                    f".getCondition({profile}.class)).setValue({num!r});",
+                    f'simulation_0.println("gph2ccm: boundary '
+                    f'{_jstr(label)[1:-1]}: {k} = {num}");',
+                ]
+                L.extend(
+                    _wrap(stmts, f"gph2ccm: boundary '{label}' "
+                          f"{k}={v} not applied (boundary missing or "
+                          f"physics model inactive?)")
+                )
+                add("")
+                applied.append(f"{label}.{k} = {v}")
+            else:
                 add(
                     f'    simulation_0.println("gph2ccm TODO: boundary '
                     f'{_jstr(b["label"])[1:-1]}: {k} = {v}");'
                 )
+    if applied:
+        add("    // E3: 以下 BC 数值已通过 Profile.setValue 自动应用：")
+        for entry in applied:
+            add(f"    //   {entry}")
+        add("")
+
+    # -- solver settings (free-form metadata -> reminders) --------------------
+    solver = meta.get("solver_settings") or {}
+    if solver:
+        add("    // ---- 求解设置（gph2ccm.Solver.* 元数据，自由键值，需人工确认） ----")
+        for k, v in solver.items():
+            add(
+                f'    simulation_0.println("gph2ccm TODO solver: '
+                f'{_jstr(str(k))[1:-1]} = {_jstr(str(v))[1:-1]}");'
+            )
         add("")
 
     # -- MRF ------------------------------------------------------------------
