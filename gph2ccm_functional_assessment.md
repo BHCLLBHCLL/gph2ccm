@@ -220,7 +220,7 @@ README 的「导入后补充清单」只能靠手工对照。
 | E1 ⚙️ | GUI 导入人工验收（M3/M4） | 用户侧 | STAR-CCM+ GUI 打开 `out_laptop_v3.ccm`（6.8M cells + 10 场），核对：区域/边界/Interface-1-2、10 个场可在 GUI 树中列出并可视化（Pressure 云图、Velocity 矢量）、空气域/固体域材料分组合理。通过后 M2/M3/M4 证据链闭环 |
 | E2 | 瞬态场与 restart 标注 | 小 | `SolutionField.phase>0` 多 phase 支持 + `CCMIOWriteRestartInfo`（iteration/time）写入，让 STAR-CCM+ 导入的场显示时间/迭代标注；FPH 多时刻（若上游存在多 cycle LS_SPHFile）的循环抽取。验收：合成两 phase 往返单测 + GUI 显示 Phase 下拉 |
 | E3 | 求解属性宏增强（B2 扩展） | 中 | `gph2ccm.Solver.*`（湍流模型等）→ physics 宏模板段；`gph2ccm.BC.*` 参数数值进边界条件宏。验收：STAR-CCM+ 2502 batch 编译通过；生成设置与 regions JSON 一致（宏数值仍需人工确认，M5） |
-| E4 | 发版工程化 v0.2.0 | 小 | `__version__` 0.1.0→0.2.0；`requirements.txt` 注明 h5py 可选（FPH）；`.gitignore` 加根目录生成物（`/out_*.ccm`）；新增 `CHANGELOG.md`（0.1.0→0.2.0：C1/C2/周期生效/FPH/31 用例）；打 tag `v0.2.0` |
+| E4 ✅ | 发版工程化 v0.2.0 | 小 | `__version__` 0.1.0→0.2.0；`requirements.txt` 注明 h5py 可选（FPH）；`.gitignore` 加根目录生成物（`/out_*.ccm`）；新增 `CHANGELOG.md`（0.1.0→0.2.0：C1/C2/周期生效/FPH/31 用例）；打 tag `v0.2.0`（2026-09-04） |
 | E5 | 场写入性能剖析 | 可选 | 1M 冒烟显示 4 场（16 MB）写 ~2.2 s，按字节远慢于网格写——profile `CCMIOWriteFieldDataf` 分块策略（对照 `chunk_faces` 引入场数据 chunk 参数）。非紧急，仅当大批量场写入成为瓶颈 |
 | E6 | vertex 场支持 | 可选 | `CCMIOVertex` 位置的场写入（legacy CCM post 惯例为 cell 中心，价值待用户需求确认） |
 

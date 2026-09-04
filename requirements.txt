@@ -1,2 +1,4 @@
 numpy>=1.24
-
+# Optional: h5py is only needed for the FPH result-file pipeline
+# (`python -m gph2ccm results.fph out.ccm` / `--fph`); install with:
+#   pip install h5py
