@@ -14,4 +14,3 @@ cases/*
 # generated verification artifacts (large)
 /out_*.ccm
 /*.ccm
-!tests/bladerotating_dm2.ccm
