@@ -61,51 +61,58 @@ Expand-Archive -Path "actions-runner-win-x64-2.337.0.zip" -DestinationPath .
 
 与官方页面对照一致即可。
 
-### 第 2 步：配置并打标签
+### 第 2 步：配置并打标签（含服务安装，一步完成）
 
-`runs-on` 依赖三个标签：`self-hosted`（GitHub 自动加）+ `windows` + `starccm`
-（自定义）。因此**只传两个自定义标签**即可：
+`runs-on` 依赖三个标签：`self-hosted`（GitHub 自动加，注意本版本默认标签
+为 `self-hosted,Windows,X64`，大小写不敏感匹配）+ `windows` + `starccm`
+（自定义）。因此**只补自定义标签 `starccm`** 即可。
+
+> **v2.337.0 变化（2026-09 实测）**：runner 包已**移除 `svc.cmd` /
+> `security.cmd`**，服务安装统一走 `config.cmd --runasservice`（内部调用
+> `bin\RunnerService.exe`）。旧教程里的 `svc.cmd install` 已失效。
+
+**方式 A（推荐）：配置 + 服务一步到位**（需**管理员** PowerShell）：
 
 ```powershell
-.\config.cmd --url https://github.com/BHCLLBHCLL/gph2ccm --token AAAA... `
-  --name (hostname)-starccm --work _work --labels windows,starccm
+.\config.cmd --unattended --url https://github.com/BHCLLBHCLL/gph2ccm `
+  --token AAAA... --name "$env:COMPUTERNAME-starccm" --work _work `
+  --labels starccm --runasservice --windowslogonaccount "NETWORK SERVICE"
+```
+
+- `--unattended`：全部参数已给齐，不再弹交互提示。
+- `--runasservice`：注册完成后立即安装并启动 Windows 服务（开机自启），
+  无需再手动装服务。服务名形如 `actions.runner.<org>-<repo>.<name>`。
+- 不想装服务就去掉 `--runasservice`，改用方式 B 手动跑。
+
+**方式 B：前台运行（不装服务，调试用）**：
+
+```powershell
+.\config.cmd --unattended --url https://github.com/BHCLLBHCLL/gph2ccm `
+  --token AAAA... --name "$env:COMPUTERNAME-starccm" --work _work --labels starccm
+.\run.cmd        # 看到 "Listening for Jobs" 即连通成功
 ```
 
 说明：
 
-- `--token AAAA...` 换成第 0 步拿到的 token。
-- `--name` 建议用 `机器名-starccm`，便于在 Actions 页面区分多台 runner。
-- `--work` 是工作目录名，默认 `_work`，显式给出可避免交互提示。
-- 若仍弹出「Enter name of work folder / run group」之类的提示，直接按 **Enter**
-  取默认值。
-- 别传 `self-hosted` 到 `--labels`：它由 GitHub 自动附加，重复传可能造成标签
-  列表里出现两条同名。
+- `--token AAAA...` 换成第 0 步拿到的 token（也可用有 repo 权限的 PAT）。
+- 别把 `self-hosted` / `windows` 传进 `--labels`：前者自动附加、后者已在
+  默认标签里，重复传可能造成标签列表出现两条同名。
+- 配置成功后，**Settings → Actions → Runners** 里应能看到该 runner 处于
+  `Idle`，标签列含 `self-hosted, Windows, X64, starccm`。
 
-配置成功后，Actions 页面 **Settings → Actions → Runners** 里应能看到该 runner
-处于 `Idle`，标签列显示 `self-hosted, windows, starccm`。
-
-### 第 3 步：前台自检一次
+### 第 3 步：服务管理（仅方式 A；v2.337.0 无 svc.cmd）
 
 ```powershell
-.\run.cmd
+Get-Service actions.runner.*                    # 查状态
+Stop-Service actions.runner.*                   # 停
+Start-Service actions.runner.*                  # 启
+# 卸载服务并注销 runner：
+.\config.cmd remove --token AAAA...
 ```
 
-看到 `Listening for Jobs` 即连通成功。按 `Ctrl+C` 停掉，再装服务。
+### 一键脚本（PowerShell，管理员，v2.337.0 实测可用）
 
-### 第 4 步：安装为服务（开机自启）
-
-```powershell
-.\svc.cmd install
-.\svc.cmd start
-```
-
-- `svc.cmd install` 需要**管理员**权限（前面已用管理员 PowerShell，天然满足）。
-- 装完后可用 `Get-Service actions.runner.*` 查看，或 `svc.cmd status` 查状态。
-- 想移除：`svc.cmd stop` → `svc.cmd uninstall`。
-
-### 一键脚本（PowerShell，管理员，已含第 0 步 token）
-
-把 `TOKEN` 和 `NAME` 替换后整体粘贴：
+把 `TOKEN` 替换后整体粘贴（已含下载校验、配置、服务安装）：
 
 ```powershell
 $ErrorActionPreference = "Stop"
@@ -116,11 +123,11 @@ $VER   = "2.337.0"
 New-Item -ItemType Directory -Force C:\actions-runner | Out-Null
 Set-Location C:\actions-runner
 Invoke-WebRequest -Uri "https://github.com/actions/runner/releases/download/v$VER/actions-runner-win-x64-$VER.zip" -OutFile "runner.zip"
-Expand-Archive -Path "runner.zip" -DestinationPath .
-.\config.cmd --url https://github.com/BHCLLBHCLL/gph2ccm --token $TOKEN --name $NAME --work _work --labels windows,starccm
-.\svc.cmd install
-.\svc.cmd start
-Write-Host "done. status:"; .\svc.cmd status
+Expand-Archive -Path "runner.zip" -DestinationPath . -Force
+.\config.cmd --unattended --url https://github.com/BHCLLBHCLL/gph2ccm `
+  --token $TOKEN --name $NAME --work _work `
+  --labels starccm --runasservice --windowslogonaccount "NETWORK SERVICE"
+Get-Service actions.runner.* | Format-Table Name, Status
 ```
 
 ---
