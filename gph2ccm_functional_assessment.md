@@ -99,12 +99,12 @@
 
 | 维度 | 评价 |
 |---|---|
-| 架构分层 | ✅ 清晰：deps（解析）/ model（模型）/ ccmio（绑定）/ convert（编排）/ verify / reorder；复用 `gphdecoding` 与 `ccmio.dll`，不自造轮子 |
-| 文档 | ✅ 四件套（README / AGENTS / DEV_SUMMARY / 问题清单）齐全且**基本与代码一致**（split 已实现，文档未超前） |
-| 工具链 | ✅ 完整：dump / topo_check / make_demo / make_two_region / extract_subset / ImportCcmCheck.java + 4 份真实样本 dump |
-| 测试 | ✅ 14 个用例（含 split / interface / verify / 元数据 / 诊断），缺 ccmio 时自动 skip；CI 已接入（GitHub Actions，Ubuntu/Windows × 3.11/3.12） |
-| 错误恢复 | ⚠️ 无 finally、无备份回滚之外的容错 |
-| 可维护性 | ⚠️ 存在若干代码质量问题（M1 / M4 / H1 / H2 / L 系列，见问题清单） |
+| 架构分层 | ✅ 清晰：deps（解析）/ model（模型）/ ccmio（绑定，含 Field API）/ convert（编排）/ fph_fields（结果场）/ regions_schema / inspect / macro / diagnose / verify / reorder；复用 `gphdecoding` 与 `ccmio.dll`，不自造轮子 |
+| 文档 | ✅ 四件套 + docs/（CI / 性能基线 / 版本行为表 / 手动验证清单）齐全且与代码一致（2026-09-04 全面同步） |
+| 工具链 | ✅ 完整：dump / topo_check / benchmark / make_demo / make_two_region / extract_subset / ImportCcmCheck.java + 真实样本 dump |
+| 测试 | ✅ **31 个用例**（含 split / interface / verify / 周期几何 / 元数据 / 诊断 / 宏 / FPH 分组 / 真实样本端到端），缺 ccmio 或样本时自动 skip；CI：托管矩阵（Ubuntu/Windows × 3.11/3.12）+ self-hosted workflow 就绪（待注册 runner） |
+| 错误恢复 | ✅ `write()` try/finally + 失败即清理半成品（A1/M4）；`--backup` 回滚；非法输入 fail-fast（regions schema / solution_fields 归一化） |
+| 可维护性 | ✅ 已知问题全部闭环：M1 / M4 / H1 / L3 已修复，H2 有结论并记录；新发现差异持续入 `version_behavior_table.md`（现 16 条） |
 
 ---
 
@@ -112,20 +112,23 @@
 
 **已实现**：`GroupId` / `MaterialId`、每 region `Region Cell Map`、
 `InterfaceDefinitions`（`Interface-N`：Name / Boundary0 / Boundary1 /
-Configuration=IN_PLACE / ConditionType=InternalInterface）、两侧带单元数据的
-边界 patch。
+Configuration=IN_PLACE / ConditionType=InternalInterface，周期配对为
+`PeriodicInterface`——C1）、两侧带单元数据的边界 patch、
+**`FieldSet` / `FieldPhase` / `Field` / `FieldData`（C2：真实 cell 场数据，
+6.8M 单元真实网格 batch 导入验证）**。
 
 **未对齐**：
-- `PeriodicBoundaries` / `Interfaces` 节点（周期 / 滑移配对）
-- `FieldSet` / `Field` / `FieldData`（任何结果场 / 初始场）
-- `Material` / `Region` 下的求解属性（湍流模型、密度、粘度等）
-- 多 processor / 分布式拓扑
+- `Material` / `Region` 下的求解属性（湍流模型、密度、粘度等）——legacy CCM
+  无导入语义，宏方案（B2）替代；
+- 多 processor / 分布式拓扑（C3：无导入侧需求证据前靠后）；
+- 多 phase / 瞬态场（`SolutionField.phase>0`、restart iteration/time 标注）——
+  C2 后续切片可加。
 
 ---
 
 ## 5. 关键缺口（按影响排序）
 
-> 执行进度（对应原始 8 项清单）：**#8 测试 ✅、#2 边界条件结构化 ✅、#1 结果场/求解设置 ✅（C2 第一切片：真实场数据写入，2026-09-03）、#3 MRF ⚠️、#4 周期/滑移配对 ✅（C1 已生效，描述性节点保留）、#5 多 processor ⚠️、#6 2D 包裹 ⚠️、#7 质量诊断 ⚠️ —— 除场数据与周期配对外，物理/求解层仍为描述性/诊断性**。
+> 执行进度（对应原始 8 项清单）：**#8 测试 ✅、#2 边界条件结构化 ✅、#1 结果场/求解设置 ✅（C2：真实场数据 + FPH 管线）、#3 MRF ⚠️（B2 宏为现行方案，设计内）、#4 周期/滑移配对 ✅（C1 生效）、#5 多 processor ⚠️（C3 靠后，设计内）、#6 2D 包裹 ✅（范围决策：检测+自说明）、#7 质量诊断 ✅（范围决策：只读诊断）——原始清单全部闭环或有明确结论（2026-09-04）**。
 
 1. **无结果场 / 求解设置** —— ✅ 真实场数据写入已落地（C2 两切片）：`model.solution_fields`（标量/向量）经 FieldSet/FieldPhase/Field/FieldData 写入 processor solution 槽；**FPH 自动管线**——`.fph` 输入或 `--fph` 附加结果文件，标量/向量自动分组 + 哨兵清零，真实样本端到端验证；求解设置仍为 `gph2ccm.Solver.*` 描述性元数据（`regions["solver_settings"]`）。
 2. **边界条件仅类型名** —— ⚠️ 已结构化：`boundary_conditions` 经 `_normalize_bctype` 规范化类型 + `gph2ccm.BC.*` 描述性参数（regions JSON 驱动），仍非求解就绪。
@@ -137,7 +140,7 @@ Configuration=IN_PLACE / ConditionType=InternalInterface）、两侧带单元数
 5. **多 processor / 分布式** —— ⚠️ 已自说明：legacy CCM 单 processor 固有限制，写入 `gph2ccm.Note.Processors`/`MultiProcessor` 元数据 + 大网格（>200 万 cell）告警；**无分布式分区写入**。
 6. **2D 网格包裹** —— ⚠️ 已检测并自说明：识别 collapsed-axis 的 2D 网格，写入 `gph2ccm.Note.Dimension`/`TwoDWrapping` 元数据；**不挤出壳层**（超出 keep-boundary 范围）。
 7. **网格质量修复** —— ⚠️ 已内嵌导出期质量摘要（`gph2ccm.Qual.*`：未覆盖/退化面计数）+ `diagnose_quality` API；**仍不修改网格**（keep-boundary 范围；重检查见 `tools/topo_check.py`）。
-8. **测试与 CI 薄弱** —— ✅ 已补 `tests/test_writer.py` **14 个**回归用例（写回读验证、split/interface、verify 放宽、结构化 BC、字段/求解/MRF/周期元数据、processor/dimension note、质量诊断）；✅ CI 已接入 `.github/workflows/tests.yml`（Ubuntu/Windows × Python 3.11/3.12），托管 runner 无 ccmio 时跳过写入/读回用例而非失败，self-hosted runner 配 `GPH2CCM_CCMIO_DLL` secret 可跑全量。
+8. **测试与 CI 薄弱** —— ✅ 已补 `tests/test_writer.py` **31 个**回归用例（写回读验证、split/interface、verify 放宽、结构化 BC、字段/求解/MRF/周期元数据、processor/dimension note、质量诊断、宏生成、周期几何校验、解算场往返与校验、FPH 分组与真实样本端到端）；✅ CI：`.github/workflows/tests.yml`（Ubuntu/Windows × 3.11/3.12）+ `self-hosted.yml`（全量 27 用例 + 性能冒烟，注册 runner 后生效）。
 
 ---
 
@@ -207,12 +210,29 @@ README 的「导入后补充清单」只能靠手工对照。
   legacy CCM 的 FV 导入路径无关，UserGuide 明说 mesher 不生成 mid-side node、
   全文 0 处「curved mesh/cell」导入。#21 保持 ❌ 是正确且永久的（非「未适配」）。
 
-### 推荐执行顺序
+### 阶段 E：C2 之后的新规划（2026-09-04 制定）
+
+> 前置状态：A/B/C/D 全部闭环，原始 8 项清单收尾；C2 已交付真实场数据 +
+> FPH 自动管线并通过 6.8M 单元真实网格 STAR-CCM+ batch 导入验证。
+
+| # | 任务 | 类型 | 说明 / 验收标准 |
+|---|---|---|---|
+| E1 ⚙️ | GUI 导入人工验收（M3/M4） | 用户侧 | STAR-CCM+ GUI 打开 `out_laptop_v3.ccm`（6.8M cells + 10 场），核对：区域/边界/Interface-1-2、10 个场可在 GUI 树中列出并可视化（Pressure 云图、Velocity 矢量）、空气域/固体域材料分组合理。通过后 M2/M3/M4 证据链闭环 |
+| E2 | 瞬态场与 restart 标注 | 小 | `SolutionField.phase>0` 多 phase 支持 + `CCMIOWriteRestartInfo`（iteration/time）写入，让 STAR-CCM+ 导入的场显示时间/迭代标注；FPH 多时刻（若上游存在多 cycle LS_SPHFile）的循环抽取。验收：合成两 phase 往返单测 + GUI 显示 Phase 下拉 |
+| E3 | 求解属性宏增强（B2 扩展） | 中 | `gph2ccm.Solver.*`（湍流模型等）→ physics 宏模板段；`gph2ccm.BC.*` 参数数值进边界条件宏。验收：STAR-CCM+ 2502 batch 编译通过；生成设置与 regions JSON 一致（宏数值仍需人工确认，M5） |
+| E4 | 发版工程化 v0.2.0 | 小 | `__version__` 0.1.0→0.2.0；`requirements.txt` 注明 h5py 可选（FPH）；`.gitignore` 加根目录生成物（`/out_*.ccm`）；新增 `CHANGELOG.md`（0.1.0→0.2.0：C1/C2/周期生效/FPH/31 用例）；打 tag `v0.2.0` |
+| E5 | 场写入性能剖析 | 可选 | 1M 冒烟显示 4 场（16 MB）写 ~2.2 s，按字节远慢于网格写——profile `CCMIOWriteFieldDataf` 分块策略（对照 `chunk_faces` 引入场数据 chunk 参数）。非紧急，仅当大批量场写入成为瓶颈 |
+| E6 | vertex 场支持 | 可选 | `CCMIOVertex` 位置的场写入（legacy CCM post 惯例为 cell 中心，价值待用户需求确认） |
+
+**持续项**：D1 runner 注册后 CI 绿灯验证（full-suite 27 用例 + 性能冒烟）；
+换 STAR-CCM+ 版本时按 M7 复核行为表。
+
+### 新推荐执行顺序
 
 ```
-A1 → A2 → B3 → B1 → B4 → A3/A4 → B2 → C1 → （C2/C3 可行性结论已出：✅ 均可行，C2 依赖 FPH 结果文件排为独立里程碑、C3 无导入侧需求证据前靠后）→ D 滚动
+E1（用户验收，价值最高）→ E4（固化里程碑）→ E2 → E3 → E5/E6（按需）
 ```
 
-理由：A 还的是当前用户可感知的质量债；B1/B3 让「导入后清单」从文档变成
-工具，是**投入产出比最高**的一步；C1 解锁叶轮机械场景的周期配对刚需；
-C2/C3 都有硬前置，先做可行性结论再排期，避免空转。
+理由：E1 是真实场景的最终人工确认，其结果决定 C2 是否需要返工，且零代码
+成本；E4 把「网格+场导出器」里程碑固化为可引用的版本；E2/E3 是自然延伸
+（瞬态 + 求解设置自动化），E5/E6 无需求驱动前不投入。
