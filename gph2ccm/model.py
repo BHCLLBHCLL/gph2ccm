@@ -73,6 +73,11 @@ class CcmModel:
     periodic: list = field(default_factory=list)  # periodic/sliding pairings, descriptive
     # C2: actual solution field data (written as real CCM Field entities).
     solution_fields: list[SolutionField] = field(default_factory=list)
+    # E2: solution restart labelling (iteration/time), e.g.
+    # {"iteration": 42, "time": 0.25, "time_units": "s", "start_angle": 0.0}.
+    # Written as the CCMIO restart node under the solution field set so
+    # STAR-CCM+ can display time/iteration for the imported post data.
+    restart_info: dict = field(default_factory=dict)
 
     @property
     def n_cells(self) -> int:
@@ -331,6 +336,7 @@ def build_model(
     mrf: Optional[list] = None,
     periodic: Optional[list] = None,
     solution_fields: Optional[list] = None,
+    restart_info: Optional[dict] = None,
 ) -> CcmModel:
     """Assemble the CCM mesh model from a ``parse_gph_mesh`` result."""
     vertices = np.asarray(mesh["vertices"], dtype=np.float64)
@@ -410,6 +416,7 @@ def build_model(
         solution_fields=_normalize_solution_fields(
             solution_fields, n_cells=int(cell_types.size)
         ),
+        restart_info=dict(restart_info) if restart_info else {},
     )
 
 

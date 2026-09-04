@@ -413,6 +413,14 @@ class CCMIO:
             "CCMIOReadMultiDimensionalFieldData", ctypes.c_int, err_p,
             CCMIOID, ctypes.c_int, id_p,
         )
+        self._CCMIOWriteRestartInfo = bind(
+            "CCMIOWriteRestartInfo", ctypes.c_int, err_p, CCMIOID, char_p,
+            ctypes.c_int, ctypes.c_float, char_p, ctypes.c_float,
+        )
+        self._CCMIOReadRestartInfo = bind(
+            "CCMIOReadRestartInfo", ctypes.c_int, err_p, CCMIOID, char_p,
+            int_p, float_p, char_p, float_p,
+        )
 
     # -- error handling -----------------------------------------------------
 
@@ -789,6 +797,63 @@ class CCMIO:
         )
         self._check(code, "CCMIOReadFieldDataf")
         return out
+
+    def write_restart_info(
+        self,
+        fieldset: CCMIOID,
+        solver_name: str = "gph2ccm",
+        iteration: int = 0,
+        time: float = 0.0,
+        time_units: Optional[str] = None,
+        start_angle: float = 0.0,
+    ) -> None:
+        """Write the solution restart node (E2: iteration/time labelling).
+
+        Creates the ``kCCMIORestart`` child under *fieldset* (the processor's
+        solution slot) so STAR-CCM+ can display iteration / time for the
+        imported post data.
+        """
+        restart = self.new_entity(fieldset, K_CCMIO_RESTART)
+        err = ctypes.c_int(K_CCMIO_NO_ERR)
+        code = self._CCMIOWriteRestartInfo(
+            ctypes.byref(err),
+            restart,
+            _b(solver_name),
+            ctypes.c_int(iteration),
+            ctypes.c_float(time),
+            _b(time_units) if time_units else None,
+            ctypes.c_float(start_angle),
+        )
+        self._check(code, "CCMIOWriteRestartInfo")
+
+    def read_restart_info(self, fieldset: CCMIOID) -> dict:
+        """Read back the restart node as a dict (absent node -> ``{}``)."""
+        restart = self.next_entity(fieldset, K_CCMIO_RESTART, 0)
+        if restart is None:
+            return {}
+        name = ctypes.create_string_buffer(K_CCMIO_MAX_STRING_LENGTH + 1)
+        units = ctypes.create_string_buffer(K_CCMIO_MAX_STRING_LENGTH + 1)
+        iteration = ctypes.c_int()
+        time = ctypes.c_float()
+        start_angle = ctypes.c_float()
+        err = ctypes.c_int(K_CCMIO_NO_ERR)
+        code = self._CCMIOReadRestartInfo(
+            ctypes.byref(err),
+            restart,
+            name,
+            ctypes.byref(iteration),
+            ctypes.byref(time),
+            units,
+            ctypes.byref(start_angle),
+        )
+        self._check(code, "CCMIOReadRestartInfo")
+        return {
+            "solver_name": name.value.decode("utf-8", errors="replace"),
+            "iteration": int(iteration.value),
+            "time": float(time.value),
+            "time_units": units.value.decode("utf-8", errors="replace"),
+            "start_angle": float(start_angle.value),
+        }
 
     # -- optional nodes -----------------------------------------------------
 

@@ -1571,6 +1571,82 @@ def test_solution_fields_validation() -> None:
     print("test_solution_fields_validation OK")
 
 
+def test_multiphase_and_restart() -> None:
+    """E2: multiple FieldPhase entities + restart info roundtrip.
+
+    Writes one scalar field per phase (0 and 1) plus a restart node
+    (solver name / iteration / time / units / start angle), reopens the file
+    and verifies both phases carry their own field and the restart node
+    reads back with the same values.
+    """
+    from gph2ccm.ccmio import (
+        K_CCMIO_FIELD,
+        K_CCMIO_FIELD_PHASE,
+        K_CCMIO_FIELD_SET,
+        K_CCMIO_SCALAR,
+    )
+    from gph2ccm.model import SolutionField
+
+    mesh = make_synthetic_gph()
+    n = 8
+    model = build_model(
+        mesh,
+        {"fluid_regions": ["fluid"]},
+        solution_fields=[
+            SolutionField(
+                name="Pressure", data=np.arange(n, dtype=np.float64), phase=0
+            ),
+            SolutionField(
+                name="Temperature",
+                data=np.arange(n, dtype=np.float64) + 100.0,
+                phase=1,
+            ),
+        ],
+        restart_info={
+            "solver_name": "scflow",
+            "iteration": 1234,
+            "time": 0.25,
+            "time_units": "s",
+            "start_angle": 45.0,
+        },
+    )
+
+    ccmio = _require_ccmio()
+    with tempfile.TemporaryDirectory(prefix="gph2ccm_e2_") as tmp:
+        out = Path(tmp) / "multiphase.ccm"
+        CcmMeshWriter(ccmio, out, verbose=False).write(model, mesh["link_data"])
+        ccmio.compress(out)
+
+        root = ccmio.open_file_readonly(out)
+        try:
+            fieldset = ccmio.next_entity(root, K_CCMIO_FIELD_SET, 0)
+            assert fieldset is not None
+
+            n_phases = 0
+            per_phase_fields: list[set] = []
+            for phase in ccmio.iter_entities(fieldset, K_CCMIO_FIELD_PHASE):
+                n_phases += 1
+                names = set()
+                for f in ccmio.iter_entities(phase, K_CCMIO_FIELD):
+                    name, _short, _dim = ccmio.read_field(f)
+                    names.add(name)
+                per_phase_fields.append(names)
+
+            assert n_phases >= 2, f"expected >=2 phases, got {n_phases}"
+            assert "Pressure" in per_phase_fields[0], per_phase_fields
+            assert "Temperature" in per_phase_fields[1], per_phase_fields
+
+            restart = ccmio.read_restart_info(fieldset)
+            assert restart.get("solver_name") == "scflow", restart
+            assert restart.get("iteration") == 1234, restart
+            assert abs(restart.get("time", 0.0) - 0.25) < 1e-5, restart
+            assert restart.get("time_units") == "s", restart
+            assert abs(restart.get("start_angle", 0.0) - 45.0) < 1e-5, restart
+        finally:
+            ccmio.close_file(root)
+    print("test_multiphase_and_restart OK")
+
+
 def test_fph_field_grouping() -> None:
     """C2 slice 2: fph2cgns flow_solution -> SolutionField grouping logic."""
     from gph2ccm.fph_fields import (
@@ -1694,6 +1770,7 @@ TESTS = [
     test_periodic_geometry_rejects_write,
     test_solution_fields_roundtrip,
     test_solution_fields_validation,
+    test_multiphase_and_restart,
     test_fph_field_grouping,
     test_fph_end_to_end_sample,
 ]

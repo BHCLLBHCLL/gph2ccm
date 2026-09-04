@@ -1138,6 +1138,21 @@ class CcmMeshWriter:
             f"[gph2ccm] wrote {n_written} solution field(s) "
             f"in {len(phases)} phase(s) (C2)"
         )
+        if model.restart_info:
+            ri = model.restart_info
+            ccmio.write_restart_info(
+                fieldset,
+                solver_name=str(ri.get("solver_name", "gph2ccm")),
+                iteration=int(ri.get("iteration", 0)),
+                time=float(ri.get("time", 0.0)),
+                time_units=(str(ri["time_units"]) if ri.get("time_units") else None),
+                start_angle=float(ri.get("start_angle", 0.0)),
+            )
+            self._log(
+                "[gph2ccm] restart info: iteration="
+                f"{ri.get('iteration', 0)}, time={ri.get('time', 0.0)} "
+                f"{ri.get('time_units') or 's'} (E2)"
+            )
         return fieldset
 
 
@@ -1218,6 +1233,7 @@ def convert_model(
     verify: bool = False,
     force_material: Optional[str] = None,
     solution_fields: Optional[list] = None,
+    restart_info: Optional[dict] = None,
     verbose: bool = True,
 ) -> Path:
     """Convert a parsed GPH ``mesh`` dict to a ``.ccm`` file."""
@@ -1254,6 +1270,7 @@ def convert_model(
         mrf=regions.get("mrf") if regions else None,
         periodic=regions.get("periodic") if regions else None,
         solution_fields=solution_fields,
+        restart_info=restart_info,
     )
     if verbose:
         extra = ""
