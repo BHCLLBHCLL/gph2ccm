@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gph2ccm"
+description = "Convert Software Cradle GPH meshes to STAR-CCM+ legacy .ccm files"
+readme = "README.md"
+license = { text = "MIT" }
+authors = [{ name = "gph2ccm contributors" }]
+requires-python = ">=3.11"
+dependencies = ["numpy>=1.24"]
+dynamic = ["version"]
+keywords = ["STAR-CCM+", "Cradle", "GPH", "CCM", "mesh", "converter"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering",
+]
+
+[project.optional-dependencies]
+fph = ["h5py>=3.0"]
+
+[project.scripts]
+gph2ccm = "gph2ccm.__main__:main"
+
+[project.urls]
+Homepage = "https://github.com/BHCLLBHCLL/gph2ccm"
+
+[tool.setuptools]
+packages = ["gph2ccm"]
+
+[tool.setuptools.dynamic]
+version = { attr = "gph2ccm.__version__" }

@@ -23,6 +23,16 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 - **Field-write profiler (E5)**: `tools/profile_fields.py` isolates the
   marginal cost of solution-field writing (0/4/16 fields + raw disk
   reference). Verdict: GB/s throughput, no optimization needed.
+- **`--fields` whitelist (F2)**: comma-separated case-insensitive solver
+  field filter for FPH inputs (`--fields PRES,VEL`; vectors matched by base
+  name), plus per-field write progress in the log.
+- **FPH parse profiler (F1)**: `tools/profile_fph.py` splits
+  `parse_gph_mesh` wall-clock into mesh decode vs LS_SPHFile field read.
+  Measured on the 1.36 GB laptop sample: field read 1.8% / mesh decode
+  98.2% -- field parsing is not the bottleneck.
+- **Packaging (F3)**: `pyproject.toml` (PEP 621) with a `gph2ccm` console
+  script and an `fph` extra (`pip install gph2ccm[fph]`); verified with a
+  clean-venv `pip install .`.
 
 ## [0.2.0] — 2026-09-04
 

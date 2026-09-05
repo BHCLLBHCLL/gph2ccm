@@ -191,14 +191,39 @@ def format_report(meta: dict) -> str:
     # -- regions / BCs ----------------------------------------------------
     bcs = meta.get("boundary_conditions") or []
     if bcs:
+        # F6: audit which params the generated macro can apply for real.
+        from .macro import BC_PARAM_TO_PROFILE, _norm_param_key, _parse_number
+
+        def _auto(k, v) -> bool:
+            return (
+                BC_PARAM_TO_PROFILE.get(_norm_param_key(k)) is not None
+                and _parse_number(v) is not None
+            )
+
         add(f"边界区域（{len(bcs)} 个）—— 需补数值")
+        auto_params: list[str] = []
         for entry in bcs:
             add(f"  - {entry['label']}  [{entry['type'] or '未指定'}]")
             for k, v in entry["params"].items():
-                add(f"      {k} = {v}")
+                mark = "  [宏可自动应用]" if _auto(k, v) else ""
+                if _auto(k, v):
+                    auto_params.append(f"{entry['label']}.{k} = {v}")
+                add(f"      {k} = {v}{mark}")
             if not entry["params"]:
                 add("      （无描述性参数，需自行填写全部数值）")
         add("")
+        if auto_params:
+            add(
+                f"其中 {len(auto_params)} 项已知数值参数可由 setup 宏自动应用"
+                "（python -m gph2ccm macro，经 Profile.setValue）："
+            )
+            for item in auto_params:
+                add(f"    -> {item}")
+            add("    验收时逐项在 GUI 中核对（证据链：regions JSON -> 宏 -> GUI）")
+            add("")
+        else:
+            add("    （无宏可自动应用的数值参数——全部需人工填写）")
+            add("")
 
     # -- fields -----------------------------------------------------------
     fields = meta.get("fields") or []

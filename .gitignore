@@ -14,3 +14,4 @@ cases/*
 # generated verification artifacts (large)
 /out_*.ccm
 /*.ccm
+!tests/test_property_based.py
