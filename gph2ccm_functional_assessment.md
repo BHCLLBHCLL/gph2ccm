@@ -54,7 +54,7 @@
 | 14 | Boundary Conditions（含对称 / 周期配对） | ⚠️ | 结构化类型规范化 + `gph2ccm.BC.*` 描述性参数（`regions` JSON 驱动）；**周期配对已生效**（C1），其余仍非求解就绪 |
 | 15 | Material / Region 求解属性 | ⚠️ | 新增 `gph2ccm.Solver.*` 描述性求解设置元数据（`regions` JSON 驱动），仍非实际属性 |
 | 16 | MRF（旋转参考系） | ⚠️ | 不自动施加旋转条件；可经 `regions["mrf"]` 写入 `gph2ccm.MRF.*` **描述性**旋转参考系声明 |
-| 17 | Periodic / Cyclic 配对 | ⚠️ | 不生成几何配对界面；可经 `regions["periodic"]` 写入 `gph2ccm.Periodic.*` **描述性**配对声明 |
+| 17 | Periodic / Cyclic 配对 | ✅ | `regions["periodic"]` 几何校验（平移点匹配/旋转刚体全等）后写为**生效**的 `InterfaceDefinitions`（`ConditionType=PeriodicInterface`，C1）；宏侧另建直接界面 + 类型提示 |
 | 18 | 2D 网格包裹 | ❌ | 不挤出壳层；新增 2D 检测 + `gph2ccm.Note.Dimension`/`TwoDWrapping` 自说明（包裹不在范围内） |
 | 19 | 单元 / 节点场数据 | ✅ | C2 第一切片：cell 中心场数据（标量 + 矢量分量）作为真实 CCM post data 写入并读回验证；vertex 场与 FPH 自动管线待排 |
 | 20 | 网格质量修复 | ⚠️ | 仍不修改网格；新增导出期内嵌 `gph2ccm.Qual.*` 摘要（未覆盖/退化面计数）+ `diagnose_quality` API；重检查仍在 `tools/topo_check.py` |
@@ -236,6 +236,37 @@ E1（用户验收，价值最高）→ E4 ✅ → E2 ✅ → E3 ✅ → E5 ✅ �
 理由：E1 是真实场景的最终人工确认，其结果决定 C2 是否需要返工，且零代码
 成本；E4 把「网格+场导出器」里程碑固化为可引用的版本；E2/E3 是自然延伸
 （瞬态 + 求解设置自动化），E5 已实证场写入非瓶颈；E6 无需求驱动前不投入。
+
+### 阶段 F：性能、分发与验证闭环（规划于 2026-09-05）
+
+E 阶段代码侧闭环后的新改进面。选型依据：**FPH 解析是端到端真实瓶颈**
+（104.9 s，占 2 m 41 s 的 ~65%，见性能基线）；工具目前只能「仓库内使用」
+（无打包元数据）；E3 的宏 API 链尚无 batch 自动验证；测试全为固定用例，
+无随机化防回归。
+
+| # | 任务 | 类型 | 说明 / 验收标准 |
+|---|---|---|---|
+| F1 | FPH 解析性能剖析与优化 | **高价值** | 把 104.9 s 拆成 **gphdecoding 网格解码** vs **h5py 场读取** 两段分别计时（新工具 `tools/profile_fph.py`，沿 E5 的差分方法）；场读取侧优化：按需读取（`--fields` 白名单）、多线程并行读（h5py 大块读释放 GIL）、必要时避免 float64 中转。**验收**：profiler 报告两段耗时占比；我方场读取段可测量地缩短。gphdecoding 内部不改动，只记录结论 |
+| F2 | 进度输出与选择性场导入 | 小 | 长任务（2 m 41 s）目前只有阶段级日志：`__main__` 增加分阶段进度（解析 N%、写出 M 场、压缩中）；`--fields PRES,VEL` 场白名单透传到 FPH 读取，跳过不需要的变量。**验收**：`--help` 可见；小样本手动确认输出可读；白名单用例进测试 |
+| F3 | 打包分发 v0.3.0 | 中 | 新增 `pyproject.toml`（PEP 621）：`console_scripts` 入口 `gph2ccm`、`[project.optional-dependencies] fph = ["h5py"]`、README 徽章；`pip install .` 后 CLI 可用。**验收**：干净 venv `pip install .` + `gph2ccm --help` + 33 用例通过；CHANGELOG 0.3.0；打 tag |
+| F4 | 宏 batch 自动验证 | 中 | 新 `tools/MacroCheck.java`：batch 导入 → 播放 `gph2ccm macro` 生成的宏 → 逐段 catch 输出 PASS/FAIL 摘要 → 断言边界类型/BC 数值已落位。**验收**：装有 STAR-CCM+ 的机器（D1 runner 或本机手动）跑通一次；`self-hosted.yml` 加可选 job。与 E1 联动（E1 通过则 F4 有真实基准） |
+| F5 | regions JSON property-based 测试 | 小 | hypothesis 随机生成合法/非法 `regions` dict 对 `regions_schema` + `build_model` + 宏生成器做不变量测试（非法输入必报 RegionsError 且含行号；合法输入宏必含对应段）。**验收**：CI 矩阵全绿 |
+| F6 | BC 闭环审计 | 可选 | inspect 报告增加「宏可自动应用的 BC 数值」清单（与 `BC_PARAM_TO_PROFILE` 对齐），E1 验收时逐项对照——把「描述性参数 → 宏已应用 → GUI 确认」串成证据链 |
+
+**推荐执行顺序**
+
+```
+F2（小而立即可用）→ F1（最大性能收益）→ F3（固化 v0.3.0）→ F4（需 STAR-CCM+ 机器）→ F5/F6（按需）
+```
+
+理由：F2 直接改善 E1 验收体验且成本极小；F1 是唯一未动的真实性能瓶颈，
+先剖析再决定优化深度；F3 在 F1/F2 特性落定后统一发版；F4 依赖
+STAR-CCM+ 机器可用性（D1 或本机），与 E1 排在同一窗口最经济；
+F5/F6 是质量加固，无阻塞不排期。
+
+**不在范围内（维持既有决策）**：多 processor（C3 判据）、高阶单元（永久 ❌）、
+2D 包裹（范围决策：检测+自说明）、vertex 场（E6 搁置）。
+
 
 **E 阶段（除 E1/E6 与 D1）已全部闭环**：代码侧无待办，剩余均为用户侧
 动作（E1 GUI 验收、D1 token）。
