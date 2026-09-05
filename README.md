@@ -20,6 +20,15 @@ GPH  →  gphdecoding（GPH 解析）→  libccmio / ccmio.dll（CCM 写出）
 参考实现（不随本仓库分发）：`libccmio-2.6.1` 源码与文档
 （`tests/libccmio-2.6.1/`，gitignored）。
 
+## 安装
+
+```bash
+pip install .            # 纯网格转换（仅 numpy）
+pip install ".[fph]"     # 含 FPH 结果管线（h5py）
+```
+
+安装后提供 `gph2ccm` 命令（等价于 `python -m gph2ccm`）。
+
 ## 用法
 
 ```bash
@@ -36,7 +45,8 @@ python -m gph2ccm mesh.gph out.ccm --verify
 python -m gph2ccm inspect out.ccm
 python -m gph2ccm inspect out.ccm --json   # 机器可读原始元数据
 
-# 从元数据生成 STAR-CCM+ Java 设置宏（边界类型 / MRF / 周期配对）
+# 从元数据生成 STAR-CCM+ Java 设置宏（边界类型 / MRF / 周期配对；
+# 已知数值型 BC 参数经 Profile.setValue 自动应用）
 python -m gph2ccm macro out.ccm -o setup.java
 python -m gph2ccm macro out.ccm -o setup.java --no-import   # 不含 mesh 自动导入块
 ```
@@ -55,6 +65,7 @@ python -m gph2ccm macro out.ccm -o setup.java --no-import   # 不含 mesh 自动
 | `--no-compress` | 跳过 `CCMIOCompress` |
 | `--backup` | 已有输出时保留为 `.ccm.bak` 而非删除 |
 | `--verify` | 转换后用 CCMIO 读回并做拓扑一致性校验 |
+| `--fields PRES,VEL` | FPH 结果场白名单（大小写不敏感；向量按基名，`VEL` 覆盖 VELX/Y/Z） |
 
 ## regions JSON 校验
 

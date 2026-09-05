@@ -70,3 +70,40 @@ jobs:
         run: |
           $bin = if ($env:STARCCM_BIN) { $env:STARCCM_BIN } else { "starccm+" }
           & $bin -batch tools/ImportCcmCheck.java
+
+  macro-check:
+    name: E3 setup-macro API chain (F4)
+    runs-on: [self-hosted, windows, starccm]
+    if: github.event_name == 'workflow_dispatch'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Generate a small CCM mesh
+        env:
+          GPH2CCM_CCMIO_DLL: ${{ secrets.GPH2CCM_CCMIO_DLL }}
+        run: python tools/benchmark.py --n 30 --out bench.ccm
+
+      - name: Verify boundary-type switch + BC value profiles in STAR-CCM+
+        # Fails the job when the log contains MACROCHECK_FAIL (any step
+        # reporting FAIL); INFO lines (no active physics on a bare import)
+        # are expected and do not count as failures.
+        env:
+          GPH2CCM_MESH: bench.ccm
+          STARCCM_BIN: ${{ secrets.STARCCM_BIN }}
+        shell: pwsh
+        run: |
+          $bin = if ($env:STARCCM_BIN) { $env:STARCCM_BIN } else { "starccm+" }
+          & $bin -batch tools/MacroCheck.java 2>&1 | Tee-Object macrocheck.log
+          if (Select-String -Path macrocheck.log -Pattern "MACROCHECK_FAIL" -Quiet) {
+            throw "MacroCheck reported failures"
+          }
+          if (-not (Select-String -Path macrocheck.log -Pattern "MACROCHECK_PASS" -Quiet)) {
+            throw "MacroCheck did not reach PASS summary"
+          }

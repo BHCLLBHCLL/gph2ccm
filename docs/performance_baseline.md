@@ -81,7 +81,37 @@ parse/write 耗时偏离此量级 >30% 需排查。
 
 **结论**：`CCMIOWriteFieldDataf` 已是单次 bulk 调用（`write_field_dataf`
 无逐单元循环、无分块），吞吐在 GB/s 量级，**无需优化**。真实管线的瓶颈
-在 FPH 解析（104.9 s，占端到端 ~65%），不在此项范围内。
+在 FPH 解析（见下节）。
+
+## FPH 解析剖析与优化（F1，2026-09-05）
+
+**剖析**：`tools/profile_fph.py` 用 monkeypatch 计时把
+`fph2cgns.parse_gph_mesh` 的总耗时拆成「LS_SPHFile 场读取」与
+「网格解码」两段。真实 1.36 GB 样本（6.83M 单元）：
+
+| 段 | 优化前 | 占比 |
+|---|---|---|
+| 场读取（`_parse_fph_flow_solution`） | 2.6 s | 1.8% |
+| 网格解码 | 139.0 s | 98.2% |
+| **总 parse** | **141.6 s** | |
+
+**场读取不是瓶颈**——瓶颈在网格解码内部。cProfile 热点：
+`gph_model.py` 的两个 LS_Nodes 描述符扫描函数
+（`ls_nodes_descriptor_elem_bytes` / `ls_nodes_vertex_count_from_descriptors`）
+以 Python 循环逐 4 字节调 `read_i32_be` **4634 万次**（~50 s）。
+
+**优化**（gphdecoding `c7c36f6`）：两个扫描函数向量化为一次
+`np.frombuffer(data, dtype=">i4", count, offset)` 零拷贝视图上的滑动窗口
+布尔掩码（语义严格等价：重叠窗口全扫、有符号 BE、同样的边界条件）。
+
+| 段 | 优化后 | 变化 |
+|---|---|---|
+| 网格解码 | 87.1 s | **-52 s** |
+| **总 parse** | **92.5 s** | **-35%** |
+
+端到端回归：`tests/test_writer.py` 34 用例 + FPH 真实样本端到端全部通过。
+下一优化目标（如需）是 `_group_faces_by_cell_id`（34.7 s，6.8M 次 Python
+dict 构建，接口输出格式所限，风险较高，暂不动）。
 
 ## 复跑
 
@@ -90,6 +120,7 @@ python tools/benchmark.py --n 100            # 1M 单元快速基线（CI 友好
 python tools/benchmark.py --n 149            # 3.3M 单元（D3 目标）
 python tools/benchmark.py --gph tests/<x>.gph  # 真实 GPH 端到端
 python tools/profile_fields.py --n 100       # E5: 场写入吞吐剖析
+python tools/profile_fph.py <file.fph>       # F1: FPH 解析两段占比
 python tools/benchmark.py --n 149 --json     # 机器可读
 ```
 
