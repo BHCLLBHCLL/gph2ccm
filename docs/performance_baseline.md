@@ -61,12 +61,35 @@ STAR-CCM+ 20.02.007-R8 batch 导入（`ImportCcmCheck.java`，license
 此记录同时是「真实 6.8M 单元 + 场数据」的回归参照：后续改写路径后，
 parse/write 耗时偏离此量级 >30% 需排查。
 
+## 场写入剖析（E5，2026-09-05）
+
+**问题**：早期小样本测得「4 场 2.2 s / 16 MB」，疑似场写入偏慢，需判断是否值得优化。
+
+**方法**：`tools/profile_fields.py` —— 同一合成网格分别带 0 / 4 / 16 个
+解算场写出，差分出**每场边际成本**；并与裸 `numpy → file` memcpy 参照对比。
+（早期 2.2 s 实为整次转换摊入的网格写出 + 一次性开销，并非场数据本身。）
+
+| 规模 | 每场边际成本 | 场数据吞吐 | 裸磁盘 memcpy | ADF 开销倍数 |
+|---|---|---|---|---|
+| 216k 单元（n=60） | 2.4 ms | 5,728 MB/s | 1,515 MB/s | x4.2 |
+| 1,000,000（n=100） | 9.9 ms | 6,497 MB/s | 1,673 MB/s | x4.1 |
+| 3,307,949（n=149） | 21.7 ms | 9,747 MB/s* | 1,614 MB/s | x2.6 |
+
+\* 大于裸磁盘参考是因为数据大部分停留在 OS write cache，未真实落盘；
+真实场景（16 组 × 6.8M float32 ≈ 437 MB）在 FPH 端到端中与网格写出
+合计 22.1 s（见上节），场数据部分推算仅 ~1-2 s 量级。
+
+**结论**：`CCMIOWriteFieldDataf` 已是单次 bulk 调用（`write_field_dataf`
+无逐单元循环、无分块），吞吐在 GB/s 量级，**无需优化**。真实管线的瓶颈
+在 FPH 解析（104.9 s，占端到端 ~65%），不在此项范围内。
+
 ## 复跑
 
 ```bash
 python tools/benchmark.py --n 100            # 1M 单元快速基线（CI 友好，约 1.5s）
 python tools/benchmark.py --n 149            # 3.3M 单元（D3 目标）
 python tools/benchmark.py --gph tests/<x>.gph  # 真实 GPH 端到端
+python tools/profile_fields.py --n 100       # E5: 场写入吞吐剖析
 python tools/benchmark.py --n 149 --json     # 机器可读
 ```
 

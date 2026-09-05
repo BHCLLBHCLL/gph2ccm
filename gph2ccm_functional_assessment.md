@@ -102,7 +102,7 @@
 | 架构分层 | ✅ 清晰：deps（解析）/ model（模型）/ ccmio（绑定，含 Field API）/ convert（编排）/ fph_fields（结果场）/ regions_schema / inspect / macro / diagnose / verify / reorder；复用 `gphdecoding` 与 `ccmio.dll`，不自造轮子 |
 | 文档 | ✅ 四件套 + docs/（CI / 性能基线 / 版本行为表 / 手动验证清单）齐全且与代码一致（2026-09-04 全面同步） |
 | 工具链 | ✅ 完整：dump / topo_check / benchmark / make_demo / make_two_region / extract_subset / ImportCcmCheck.java + 真实样本 dump |
-| 测试 | ✅ **31 个用例**（含 split / interface / verify / 周期几何 / 元数据 / 诊断 / 宏 / FPH 分组 / 真实样本端到端），缺 ccmio 或样本时自动 skip；CI：托管矩阵（Ubuntu/Windows × 3.11/3.12）+ self-hosted workflow 就绪（待注册 runner） |
+| 测试 | ✅ **33 个用例**（含 split / interface / verify / 周期几何 / 元数据 / 诊断 / 宏 / 多 phase+restart / FPH 分组 / 真实样本端到端），缺 ccmio 或样本时自动 skip；CI：托管矩阵（Ubuntu/Windows × 3.11/3.12）+ self-hosted workflow 就绪（待注册 runner） |
 | 错误恢复 | ✅ `write()` try/finally + 失败即清理半成品（A1/M4）；`--backup` 回滚；非法输入 fail-fast（regions schema / solution_fields 归一化） |
 | 可维护性 | ✅ 已知问题全部闭环：M1 / M4 / H1 / L3 已修复，H2 有结论并记录；新发现差异持续入 `version_behavior_table.md`（现 16 条） |
 
@@ -140,7 +140,7 @@ Configuration=IN_PLACE / ConditionType=InternalInterface，周期配对为
 5. **多 processor / 分布式** —— ⚠️ 已自说明：legacy CCM 单 processor 固有限制，写入 `gph2ccm.Note.Processors`/`MultiProcessor` 元数据 + 大网格（>200 万 cell）告警；**无分布式分区写入**。
 6. **2D 网格包裹** —— ⚠️ 已检测并自说明：识别 collapsed-axis 的 2D 网格，写入 `gph2ccm.Note.Dimension`/`TwoDWrapping` 元数据；**不挤出壳层**（超出 keep-boundary 范围）。
 7. **网格质量修复** —— ⚠️ 已内嵌导出期质量摘要（`gph2ccm.Qual.*`：未覆盖/退化面计数）+ `diagnose_quality` API；**仍不修改网格**（keep-boundary 范围；重检查见 `tools/topo_check.py`）。
-8. **测试与 CI 薄弱** —— ✅ 已补 `tests/test_writer.py` **31 个**回归用例（写回读验证、split/interface、verify 放宽、结构化 BC、字段/求解/MRF/周期元数据、processor/dimension note、质量诊断、宏生成、周期几何校验、解算场往返与校验、FPH 分组与真实样本端到端）；✅ CI：`.github/workflows/tests.yml`（Ubuntu/Windows × 3.11/3.12）+ `self-hosted.yml`（全量 27 用例 + 性能冒烟，注册 runner 后生效）。
+8. **测试与 CI 薄弱** —— ✅ 已补 `tests/test_writer.py` **33 个**回归用例（写回读验证、split/interface、verify 放宽、结构化 BC、字段/求解/MRF/周期元数据、processor/dimension note、质量诊断、宏生成与 BC 数值应用、周期几何校验、解算场往返与校验、多 phase+restart 往返、FPH 分组与真实样本端到端）；✅ CI：`.github/workflows/tests.yml`（Ubuntu/Windows × 3.11/3.12）+ `self-hosted.yml`（全量 27 用例 + 性能冒烟，注册 runner 后生效）。
 
 ---
 
@@ -218,11 +218,11 @@ README 的「导入后补充清单」只能靠手工对照。
 | # | 任务 | 类型 | 说明 / 验收标准 |
 |---|---|---|---|
 | E1 ⚙️ | GUI 导入人工验收（M3/M4） | 用户侧 | STAR-CCM+ GUI 打开 `out_laptop_v3.ccm`（6.8M cells + 10 场），核对：区域/边界/Interface-1-2、10 个场可在 GUI 树中列出并可视化（Pressure 云图、Velocity 矢量）、空气域/固体域材料分组合理。通过后 M2/M3/M4 证据链闭环 |
-| E2 | 瞬态场与 restart 标注 | 小 | `SolutionField.phase>0` 多 phase 支持 + `CCMIOWriteRestartInfo`（iteration/time）写入，让 STAR-CCM+ 导入的场显示时间/迭代标注；FPH 多时刻（若上游存在多 cycle LS_SPHFile）的循环抽取。验收：合成两 phase 往返单测 + GUI 显示 Phase 下拉 |
-| E3 | 求解属性宏增强（B2 扩展） | 中 | `gph2ccm.Solver.*`（湍流模型等）→ physics 宏模板段；`gph2ccm.BC.*` 参数数值进边界条件宏。验收：STAR-CCM+ 2502 batch 编译通过；生成设置与 regions JSON 一致（宏数值仍需人工确认，M5） |
+| E2 ✅ | 瞬态场与 restart 标注 | 小 | `SolutionField.phase>0` 多 phase 支持（每 phase 独立 FieldPhase 实体）+ `CCMIOWriteRestartInfo`/`CCMIOReadRestartInfo` 绑定（solver name/iteration/time/units/start angle）。验收：`test_multiphase_and_restart` 两 phase 写读往返 + restart 节点数值精确一致（2026-09-05）。FPH 多时刻循环抽取留待上游出现多 cycle LS_SPHFile 时按需做 |
+| E3 ✅ | 求解属性宏增强（B2 扩展） | 中 | 已知 BC 参数（速度/静压/总压/静温/总温/湍流强度/粘度比/质量流量）经 `getValues().getCondition(<Profile>.class).setValue(n)` **真实应用**（API 逐个 javap 验证于本地 2502 的 starbase/flow/energy/turbulence.jar）；未知参数与 `gph2ccm.Solver.*`（自由键值）保持 println 提醒。验收：`test_macro_bc_values_applied`（2026-09-05）；STAR-CCM+ batch 编译验证归入 E1 |
 | E4 ✅ | 发版工程化 v0.2.0 | 小 | `__version__` 0.1.0→0.2.0；`requirements.txt` 注明 h5py 可选（FPH）；`.gitignore` 加根目录生成物（`/out_*.ccm`）；新增 `CHANGELOG.md`（0.1.0→0.2.0：C1/C2/周期生效/FPH/31 用例）；打 tag `v0.2.0`（2026-09-04） |
-| E5 | 场写入性能剖析 | 可选 | 1M 冒烟显示 4 场（16 MB）写 ~2.2 s，按字节远慢于网格写——profile `CCMIOWriteFieldDataf` 分块策略（对照 `chunk_faces` 引入场数据 chunk 参数）。非紧急，仅当大批量场写入成为瓶颈 |
-| E6 | vertex 场支持 | 可选 | `CCMIOVertex` 位置的场写入（legacy CCM post 惯例为 cell 中心，价值待用户需求确认） |
+| E5 ✅ | 场写入性能剖析 | 可选 | `tools/profile_fields.py`（0/4/16 场差分 + 裸磁盘参照）：每场边际成本 9.9 ms @1M / 21.7 ms @3.3M 单元，吞吐 6.5–9.7 GB/s，ADF 开销仅 x2.6–4.2 —— **无需优化**；早期「2.2s/16MB」是网格写出摊入的误读。结论与复跑命令入 `docs/performance_baseline.md`（2026-09-05） |
+| E6 ⏸ | vertex 场支持 | 可选 | `CCMIOVertex` 位置的场写入（legacy CCM post 惯例为 cell 中心，价值待用户需求确认）。**决策：维持搁置**，无导入侧需求证据前不投入（与 C3 同判据） |
 
 **持续项**：D1 runner 注册后 CI 绿灯验证（full-suite 27 用例 + 性能冒烟）；
 换 STAR-CCM+ 版本时按 M7 复核行为表。
@@ -230,9 +230,12 @@ README 的「导入后补充清单」只能靠手工对照。
 ### 新推荐执行顺序
 
 ```
-E1（用户验收，价值最高）→ E4（固化里程碑）→ E2 → E3 → E5/E6（按需）
+E1（用户验收，价值最高）→ E4 ✅ → E2 ✅ → E3 ✅ → E5 ✅ → E6 ⏸（待需求）
 ```
 
 理由：E1 是真实场景的最终人工确认，其结果决定 C2 是否需要返工，且零代码
 成本；E4 把「网格+场导出器」里程碑固化为可引用的版本；E2/E3 是自然延伸
-（瞬态 + 求解设置自动化），E5/E6 无需求驱动前不投入。
+（瞬态 + 求解设置自动化），E5 已实证场写入非瓶颈；E6 无需求驱动前不投入。
+
+**E 阶段（除 E1/E6 与 D1）已全部闭环**：代码侧无待办，剩余均为用户侧
+动作（E1 GUI 验收、D1 token）。

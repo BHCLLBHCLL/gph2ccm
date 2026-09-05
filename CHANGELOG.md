@@ -3,6 +3,27 @@
 All notable changes to **gph2ccm** are documented here.
 Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [Unreleased]
+
+### Added
+
+- **Transient solution support (E2)**: `SolutionField.phase` > 0 writes one
+  `FieldPhase` entity per phase under the solution field set; `restart_info`
+  (solver name / iteration / time / units / start angle) is written as the
+  CCMIO restart node so STAR-CCM+ can label imported post data with
+  iteration/time. Round-trip covered by `test_multiphase_and_restart`.
+- **Macro applies boundary-condition values (E3)**: known numeric BC params
+  (velocity magnitude, static/total pressure, static/total temperature,
+  turbulence intensity, turbulent viscosity ratio, mass flow rate) are
+  applied for real via
+  `boundary.getValues().getCondition(<Profile>.class).setValue(n)`;
+  profile classes javap-verified against the local STAR-CCM+ 2502 install
+  (`starbase`/`flow`/`energy`/`turbulence.jar`). Unknown params and
+  free-form `gph2ccm.Solver.*` metadata remain `println` reminders.
+- **Field-write profiler (E5)**: `tools/profile_fields.py` isolates the
+  marginal cost of solution-field writing (0/4/16 fields + raw disk
+  reference). Verdict: GB/s throughput, no optimization needed.
+
 ## [0.2.0] — 2026-09-04
 
 Milestone: from "mesh mover" to **mesh + metadata + periodic interfaces +
