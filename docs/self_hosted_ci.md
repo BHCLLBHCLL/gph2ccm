@@ -3,14 +3,17 @@
 托管 runner 上没有 `ccmio.dll`（它随 STAR-CCM+ 分发），所以
 `tests/test_writer.py` 里所有「写出 / 读回」用例在托管 runner 上只能
 **SKIP**（现只有 3 个纯逻辑用例真正跑）。在装有 STAR-CCM+ 的机器上挂一个
-self-hosted runner，就能把 27 个用例全量跑通，并可选做 STAR-CCM+ 端到端
+self-hosted runner，就能把 34 个用例全量跑通，并可选做 STAR-CCM+ 端到端
 导入验证。
 
 `.github/workflows/self-hosted.yml` 已就绪：
 
-- `full-suite`（每次 push 到 `main` + 手动）：全量 27 用例 + 1M 单元性能冒烟。
+- `full-suite`（每次 push 到 `main` + 手动）：全量 34 用例 + 1M 单元性能冒烟。
 - `import-check`（仅手动 `workflow_dispatch`）：生成小网格 → `starccm+ -batch`
   端到端导入并打印单元/顶点/边界统计。需要 license。
+- `macro-check`（仅手动 `workflow_dispatch`，F4）：同款小网格上 batch 验证
+  setup 宏 API 链（边界类型切换 + BC Profile.setValue），日志含
+  `MACROCHECK_FAIL` 即 job 失败。需要 license。
 
 ---
 
