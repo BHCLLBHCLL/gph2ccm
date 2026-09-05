@@ -1742,6 +1742,33 @@ def test_fph_field_grouping() -> None:
     print("test_fph_field_grouping OK")
 
 
+def test_fields_whitelist() -> None:
+    """F2: --fields whitelist filters grouped fields case-insensitively;
+    vectors are matched by base name, unmatched entries are ignored."""
+    from gph2ccm.fph_fields import solution_fields_from_flow_solution
+
+    fs = {
+        "PRES": np.arange(4, dtype=np.float64),
+        "TEMP": np.arange(4, dtype=np.float64) + 10,
+        "VELX": np.ones(4),
+        "VELY": np.full(4, 2.0),
+        "VELZ": np.full(4, 3.0),
+    }
+    # case-insensitive scalar + vector-by-base-name
+    out = solution_fields_from_flow_solution(fs, fields=["pres", "vel"])
+    assert {f.name for f in out} == {"PRES", "VEL"}, out
+    # vector keeps its (n, 3) shape after filtering
+    vel = next(f for f in out if f.name == "VEL")
+    assert vel.data.shape == (4, 3)
+    # unmatched whitelist entries are silently ignored
+    out2 = solution_fields_from_flow_solution(fs, fields=["PRES", "NOSUCH"])
+    assert {f.name for f in out2} == {"PRES"}
+    # no whitelist -> everything (regression guard)
+    out3 = solution_fields_from_flow_solution(fs)
+    assert {f.name for f in out3} == {"PRES", "TEMP", "VEL"}
+    print("test_fields_whitelist OK")
+
+
 def test_fph_end_to_end_sample() -> None:
     """C2 slice 2 end-to-end on a real FPH sample (skipped when absent).
 
@@ -1827,6 +1854,7 @@ TESTS = [
     test_solution_fields_validation,
     test_multiphase_and_restart,
     test_fph_field_grouping,
+    test_fields_whitelist,
     test_fph_end_to_end_sample,
 ]
 

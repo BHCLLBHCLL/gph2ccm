@@ -145,6 +145,13 @@ def main(argv: list[str] | None = None) -> int:
         "(requires h5py). Unnecessary when the input itself is a .fph file.",
     )
     parser.add_argument(
+        "--fields",
+        metavar="NAME,NAME",
+        help="comma-separated whitelist of solver fields to write "
+        "(case-insensitive; vectors by base name, e.g. VEL covers the "
+        "VELX/Y/Z trio). Default: write every field found in the FPH.",
+    )
+    parser.add_argument(
         "--ccmio-dll",
         metavar="PATH",
         help="path to ccmio.dll / libccmio.so (default: auto-discover, "
@@ -232,6 +239,10 @@ def main(argv: list[str] | None = None) -> int:
             regions_json=args.regions,
             boundary_types_json=args.boundary_types,
             fph_path=args.fph,
+            fields=(
+                [f.strip() for f in args.fields.split(",") if f.strip()]
+                if args.fields else None
+            ),
             ccmio_dll=args.ccmio_dll,
             compress=not args.no_compress,
             backup=args.backup,

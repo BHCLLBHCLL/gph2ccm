@@ -1086,6 +1086,8 @@ class CcmMeshWriter:
         fieldset = ccmio.new_entity(root, K_CCMIO_FIELD_SET, "gph2ccm solution")
         phases: dict[int, object] = {}
         n_written = 0
+        n_total = len(model.solution_fields)
+        t_fields = time.perf_counter()
         for i, sf in enumerate(model.solution_fields):
             data = np.asarray(sf.data, dtype=np.float64)
             if data.ndim == 1 and data.shape[0] != model.n_cells:
@@ -1134,6 +1136,12 @@ class CcmMeshWriter:
                 )
                 ccmio.write_field_dataf(sfield, cell_map, K_CCMIO_CELL, data)
             n_written += 1
+            if n_total > 2:
+                self._log(
+                    f"[gph2ccm] field {n_written}/{n_total}: {sf.name} "
+                    f"({data.size * 4 / 1e6:.1f} MB as float32) "
+                    f"[{time.perf_counter() - t_fields:.1f}s]"
+                )
         self._log(
             f"[gph2ccm] wrote {n_written} solution field(s) "
             f"in {len(phases)} phase(s) (C2)"
@@ -1173,6 +1181,7 @@ def convert_gph(
     split_regions: bool = False,
     verify: bool = False,
     force_material: Optional[str] = None,
+    fields: Optional[list[str]] = None,
     verbose: bool = True,
 ) -> Path:
     """Convert a Cradle ``.gph`` mesh to a STAR-CCM+ legacy ``.ccm`` file.
@@ -1180,7 +1189,9 @@ def convert_gph(
     ``fph_path`` optionally points at an FPH result file (``CRDL-FLD``) from
     the same run; its ``LS_SPHFile`` solver fields are written as real CCM
     post data (C2).  A ``.fph`` input file carries both mesh and results, so
-    ``--fph`` is unnecessary in that case.
+    ``--fph`` is unnecessary in that case.  ``fields`` (F2) is an optional
+    whitelist limiting which solver fields are written (case-insensitive,
+    vectors by base name).
     """
     gph_path = Path(gph_path).resolve()
     if not gph_path.is_file():
@@ -1212,6 +1223,7 @@ def convert_gph(
         split_regions=split_regions,
         verify=verify,
         force_material=force_material,
+        fields_filter=fields,
         verbose=verbose,
     )
 
@@ -1234,6 +1246,7 @@ def convert_model(
     force_material: Optional[str] = None,
     solution_fields: Optional[list] = None,
     restart_info: Optional[dict] = None,
+    fields_filter: Optional[list[str]] = None,
     verbose: bool = True,
 ) -> Path:
     """Convert a parsed GPH ``mesh`` dict to a ``.ccm`` file."""
@@ -1250,7 +1263,7 @@ def convert_model(
         from .fph_fields import solution_fields_from_flow_solution
 
         solution_fields = solution_fields_from_flow_solution(
-            mesh["flow_solution"]
+            mesh["flow_solution"], fields=fields_filter
         )
         if verbose:
             print(

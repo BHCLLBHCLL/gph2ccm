@@ -70,31 +70,42 @@ def solution_fields_from_flow_solution(
     flow_solution: dict[str, np.ndarray],
     n_cells: Optional[int] = None,
     clip_sentinels: bool = True,
+    fields: Optional[list[str]] = None,
 ) -> list[SolutionField]:
     """Convert an fph2cgns ``flow_solution`` dict to SolutionField entries.
+
+    ``fields`` is an optional whitelist (F2 ``--fields PRES,VEL``): matched
+    case-insensitively against the grouped field names -- scalars by their
+    own name, vectors by their base name (``VEL`` covers the VELX/Y/Z trio).
+    Unmatched whitelist entries are ignored silently (the FPH simply may not
+    carry them).
 
     Raises :class:`ValueError` when *n_cells* is given and any variable does
     not match the mesh cell count (e.g. FPH/ GPH from different runs).
     """
     scalars, vectors = group_flow_solution(flow_solution)
-    fields: list[SolutionField] = []
+    if fields:
+        wanted = {str(f).strip().upper() for f in fields if str(f).strip()}
+        scalars = {k: v for k, v in scalars.items() if k.upper() in wanted}
+        vectors = {k: v for k, v in vectors.items() if k.upper() in wanted}
+    fields_out: list[SolutionField] = []
     for name, arr in scalars.items():
         if clip_sentinels:
             arr = _clip_sentinels(arr)
-        fields.append(SolutionField(name=name, data=arr))
+        fields_out.append(SolutionField(name=name, data=arr))
     for name, arr in vectors.items():
         if clip_sentinels:
             arr = _clip_sentinels(arr)
-        fields.append(SolutionField(name=name, data=arr))
+        fields_out.append(SolutionField(name=name, data=arr))
     if n_cells is not None:
-        for f in fields:
+        for f in fields_out:
             if f.data.shape[0] != n_cells:
                 raise ValueError(
                     f"FPH field {f.name!r} has {f.data.shape[0]} values but "
                     f"the mesh has {n_cells} cells -- the .fph and the mesh "
                     "appear to come from different runs"
                 )
-    return fields
+    return fields_out
 
 
 def load_fph_flow_solution(
