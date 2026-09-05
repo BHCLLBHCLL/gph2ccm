@@ -3,7 +3,7 @@
 All notable changes to **gph2ccm** are documented here.
 Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
-## [Unreleased]
+## [0.3.0] — 2026-09-05
 
 ### Added
 
@@ -20,19 +20,32 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
   profile classes javap-verified against the local STAR-CCM+ 2502 install
   (`starbase`/`flow`/`energy`/`turbulence.jar`). Unknown params and
   free-form `gph2ccm.Solver.*` metadata remain `println` reminders.
-- **Field-write profiler (E5)**: `tools/profile_fields.py` isolates the
-  marginal cost of solution-field writing (0/4/16 fields + raw disk
-  reference). Verdict: GB/s throughput, no optimization needed.
 - **`--fields` whitelist (F2)**: comma-separated case-insensitive solver
   field filter for FPH inputs (`--fields PRES,VEL`; vectors matched by base
   name), plus per-field write progress in the log.
+- **Packaging (F3)**: `pyproject.toml` (PEP 621) with a `gph2ccm` console
+  script and an `fph` extra (`pip install gph2ccm[fph]`); verified with a
+  clean-venv `pip install .`.
+- **`MacroCheck.java` (F4)**: batch macro verifying the generated-setup API
+  chain (boundary type switch + BC value profiles) in a real STAR-CCM+
+  batch run; verified locally on 2502 (`MACROCHECK_PASS`).
+- **Property-based tests (F5)**: hypothesis invariants over the regions
+  schema and macro generator (optional dependency; auto-skipped).
+- **inspect BC macro-audit (F6)**: the report marks which BC params the
+  setup macro can auto-apply, closing the JSON -> macro -> GUI evidence
+  chain.
+
+### Changed
+
 - **FPH parse profiler (F1)**: `tools/profile_fph.py` splits
   `parse_gph_mesh` wall-clock into mesh decode vs LS_SPHFile field read.
   Measured on the 1.36 GB laptop sample: field read 1.8% / mesh decode
   98.2% -- field parsing is not the bottleneck.
-- **Packaging (F3)**: `pyproject.toml` (PEP 621) with a `gph2ccm` console
-  script and an `fph` extra (`pip install gph2ccm[fph]`); verified with a
-  clean-venv `pip install .`.
+- (gphdecoding `c7c36f6`) vectorized the LS_Nodes descriptor scans, which
+  dominated the parse: 1.36 GB FPH parse **141.6 s -> 92.5 s (-35%)**.
+- **Field-write profiler (E5)**: `tools/profile_fields.py` isolates the
+  marginal cost of solution-field writing (0/4/16 fields + raw disk
+  reference). Verdict: GB/s throughput, no optimization needed.
 
 ## [0.2.0] — 2026-09-04
 

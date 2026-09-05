@@ -246,17 +246,17 @@ E 阶段代码侧闭环后的新改进面。选型依据：**FPH 解析是端到
 
 | # | 任务 | 类型 | 说明 / 验收标准 |
 |---|---|---|---|
-| F1 | FPH 解析性能剖析与优化 | **高价值** | 把 104.9 s 拆成 **gphdecoding 网格解码** vs **h5py 场读取** 两段分别计时（新工具 `tools/profile_fph.py`，沿 E5 的差分方法）；场读取侧优化：按需读取（`--fields` 白名单）、多线程并行读（h5py 大块读释放 GIL）、必要时避免 float64 中转。**验收**：profiler 报告两段耗时占比；我方场读取段可测量地缩短。gphdecoding 内部不改动，只记录结论 |
-| F2 | 进度输出与选择性场导入 | 小 | 长任务（2 m 41 s）目前只有阶段级日志：`__main__` 增加分阶段进度（解析 N%、写出 M 场、压缩中）；`--fields PRES,VEL` 场白名单透传到 FPH 读取，跳过不需要的变量。**验收**：`--help` 可见；小样本手动确认输出可读；白名单用例进测试 |
-| F3 | 打包分发 v0.3.0 | 中 | 新增 `pyproject.toml`（PEP 621）：`console_scripts` 入口 `gph2ccm`、`[project.optional-dependencies] fph = ["h5py"]`、README 徽章；`pip install .` 后 CLI 可用。**验收**：干净 venv `pip install .` + `gph2ccm --help` + 33 用例通过；CHANGELOG 0.3.0；打 tag |
-| F4 | 宏 batch 自动验证 | 中 | 新 `tools/MacroCheck.java`：batch 导入 → 播放 `gph2ccm macro` 生成的宏 → 逐段 catch 输出 PASS/FAIL 摘要 → 断言边界类型/BC 数值已落位。**验收**：装有 STAR-CCM+ 的机器（D1 runner 或本机手动）跑通一次；`self-hosted.yml` 加可选 job。与 E1 联动（E1 通过则 F4 有真实基准） |
-| F5 | regions JSON property-based 测试 | 小 | hypothesis 随机生成合法/非法 `regions` dict 对 `regions_schema` + `build_model` + 宏生成器做不变量测试（非法输入必报 RegionsError 且含行号；合法输入宏必含对应段）。**验收**：CI 矩阵全绿 |
-| F6 | BC 闭环审计 | 可选 | inspect 报告增加「宏可自动应用的 BC 数值」清单（与 `BC_PARAM_TO_PROFILE` 对齐），E1 验收时逐项对照——把「描述性参数 → 宏已应用 → GUI 确认」串成证据链 |
+| F1 ✅ | FPH 解析性能剖析与优化 | **高价值** | 把 104.9 s 拆成 **gphdecoding 网格解码** vs **h5py 场读取** 两段分别计时（新工具 `tools/profile_fph.py`，沿 E5 的差分方法）；场读取侧优化：按需读取（`--fields` 白名单）、多线程并行读（h5py 大块读释放 GIL）、必要时避免 float64 中转。**验收**：profiler 报告两段耗时占比；我方场读取段可测量地缩短。gphdecoding 内部不改动，只记录结论 |
+| F2 ✅ | 进度输出与选择性场导入 | 小 | 长任务（2 m 41 s）目前只有阶段级日志：`__main__` 增加分阶段进度（解析 N%、写出 M 场、压缩中）；`--fields PRES,VEL` 场白名单透传到 FPH 读取，跳过不需要的变量。**验收**：`--help` 可见；小样本手动确认输出可读；白名单用例进测试 |
+| F3 ✅ | 打包分发 v0.3.0 | 中 | 新增 `pyproject.toml`（PEP 621）：`console_scripts` 入口 `gph2ccm`、`[project.optional-dependencies] fph = ["h5py"]`、README 徽章；`pip install .` 后 CLI 可用。**验收**：干净 venv `pip install .` + `gph2ccm --help` + 33 用例通过；CHANGELOG 0.3.0；打 tag |
+| F4 ✅ | 宏 batch 自动验证 | 中 | 新 `tools/MacroCheck.java`：batch 导入 → 播放 `gph2ccm macro` 生成的宏 → 逐段 catch 输出 PASS/FAIL 摘要 → 断言边界类型/BC 数值已落位。**验收**：装有 STAR-CCM+ 的机器（D1 runner 或本机手动）跑通一次；`self-hosted.yml` 加可选 job。与 E1 联动（E1 通过则 F4 有真实基准） |
+| F5 ✅ | regions JSON property-based 测试 | 小 | hypothesis 随机生成合法/非法 `regions` dict 对 `regions_schema` + `build_model` + 宏生成器做不变量测试（非法输入必报 RegionsError 且含行号；合法输入宏必含对应段）。**验收**：CI 矩阵全绿 |
+| F6 ✅ | BC 闭环审计 | 可选 | inspect 报告增加「宏可自动应用的 BC 数值」清单（与 `BC_PARAM_TO_PROFILE` 对齐），E1 验收时逐项对照——把「描述性参数 → 宏已应用 → GUI 确认」串成证据链 |
 
 **推荐执行顺序**
 
 ```
-F2（小而立即可用）→ F1（最大性能收益）→ F3（固化 v0.3.0）→ F4（需 STAR-CCM+ 机器）→ F5/F6（按需）
+F2 ✅ → F1 ✅ → F3 ✅ → F4 ✅ → F5/F6 ✅（2026-09-05 全部闭环）
 ```
 
 理由：F2 直接改善 E1 验收体验且成本极小；F1 是唯一未动的真实性能瓶颈，
